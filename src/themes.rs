@@ -54,17 +54,15 @@ pub fn get_current_theme(custom_path: Option<&Path>) -> Result<Option<Theme>> {
         return Ok(None);
     }
 
-    let theme_path = &config.general.import[0];
-    let theme_path = PathBuf::from(theme_path);
+    let theme_path = PathBuf::from(&config.general.import[0]);
     let themes = list_themes(custom_path)?;
 
-    if let Some(theme) = themes.iter().find(|&t| t.path == theme_path) {
-        return Ok(Some(theme.clone()));
+    if let Some(theme) = themes.into_iter().find(|t| t.path == theme_path) {
+        return Ok(Some(theme));
     }
 
     Ok(Some(Theme {
         name: theme_path
-            .as_path()
             .file_stem()
             .and_then(|s| s.to_str())
             .unwrap_or("unknown")
@@ -77,16 +75,11 @@ pub fn get_current_theme(custom_path: Option<&Path>) -> Result<Option<Theme>> {
 pub fn get_theme_by_name(name: &str, custom_path: Option<&Path>) -> Result<Theme> {
     let themes = list_themes(custom_path)?;
 
-    if let Some(theme) = themes.iter().find(|t| t.name == name) {
-        return Ok(theme.clone());
-    }
-
-    let name_lower = name.to_lowercase();
-    if let Some(theme) = themes.iter().find(|t| t.name.to_lowercase() == name_lower) {
-        return Ok(theme.clone());
-    }
-
-    Err(AppError::ThemeNotFound(name.to_string()))
+    // Try exact match first, then case-insensitive
+    themes
+        .into_iter()
+        .find(|t| t.name == name || t.name.eq_ignore_ascii_case(name))
+        .ok_or_else(|| AppError::ThemeNotFound(name.to_string()))
 }
 
 #[cfg(test)]
@@ -96,10 +89,10 @@ mod tests {
     use tempfile::TempDir;
 
     fn create_temp_dir(files: &[&str]) -> TempDir {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = tempfile::tempdir().expect("Failed to create temp dir");
         for file in files {
             let path = dir.path().join(format!("{}.toml", file));
-            fs::write(&path, "").unwrap();
+            fs::write(&path, "").expect("Failed to write temp file");
         }
         dir
     }
@@ -117,9 +110,9 @@ mod tests {
 
     #[test]
     fn theme_from_path_works_on_any_file() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = tempfile::tempdir().expect("Failed to create temp dir");
         let path = dir.path().join("theme.toml");
-        fs::write(&path, "").unwrap();
+        fs::write(&path, "").expect("Failed to write temp file");
 
         let result = Theme::from_path(&path);
 
@@ -139,10 +132,10 @@ mod tests {
 
     #[test]
     fn list_themes_filters_only_toml_files() {
-        let dir = tempfile::tempdir().unwrap();
-        fs::write(dir.path().join("valid.toml"), "").unwrap();
-        fs::write(dir.path().join("readme.txt"), "").unwrap();
-        fs::write(dir.path().join("config.yml"), "").unwrap();
+        let dir = tempfile::tempdir().expect("Failed to create temp dir");
+        fs::write(dir.path().join("valid.toml"), "").expect("Failed to write file");
+        fs::write(dir.path().join("readme.txt"), "").expect("Failed to write file");
+        fs::write(dir.path().join("config.yml"), "").expect("Failed to write file");
 
         let themes = list_themes(Some(dir.path())).expect("Should list themes");
 

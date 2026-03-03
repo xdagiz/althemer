@@ -4,10 +4,12 @@ use clap::{Parser, Subcommand};
 
 mod config;
 mod error;
+mod picker;
 mod switcher;
 mod themes;
 
-use crate::switcher::switch_theme;
+use crate::error::AppError;
+use crate::switcher::{select_theme, switch_theme};
 use crate::themes::{get_current_theme, list_themes};
 
 #[derive(Parser)]
@@ -39,13 +41,28 @@ fn main() {
     let custom_themes_path = cli.themes.as_deref();
 
     match &cli.command {
-        Commands::List => {
-            let themes = list_themes(custom_themes_path).expect("Failed to list themes");
-            println!("Available themes ({} total):", themes.len());
-            for theme in themes {
-                println!("  - {}", theme.name);
+        Commands::List => match select_theme(custom_themes_path) {
+            Ok(_) => {}
+            Err(AppError::NoTerminal) => {
+                eprintln!("Note: Not running in terminal. Showing plain list.");
+                match list_themes(custom_themes_path) {
+                    Ok(themes) => {
+                        println!("Available themes ({} total):", themes.len());
+                        for theme in themes {
+                            println!("  - {}", theme.name);
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("Error listing themes: {}", e);
+                        std::process::exit(1);
+                    }
+                }
             }
-        }
+            Err(e) => {
+                eprintln!("Error: {}", e);
+                std::process::exit(1);
+            }
+        },
         Commands::Current => match get_current_theme(custom_themes_path) {
             Ok(Some(theme)) => {
                 println!("Current theme: {}", theme.name);

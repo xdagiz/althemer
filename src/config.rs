@@ -63,3 +63,28 @@ pub fn write_config(path: &Path, config: &AlacrittyConfig) -> Result<()> {
     std::fs::write(path, content)?;
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn get_themes_dir_custom_path_exists() {
+        let dir = tempfile::tempdir().unwrap();
+
+        let result = get_themes_dir(Some(dir.path()));
+
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), dir.path());
+    }
+
+    #[test]
+    fn get_themes_dir_custom_path_not_exists() {
+        let dir = tempfile::tempdir().unwrap();
+        let non_existent = dir.path().join("nonexistent");
+
+        let result = get_themes_dir(Some(&non_existent));
+
+        assert!(result.is_err());
+    }
+}

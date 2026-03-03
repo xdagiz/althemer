@@ -20,6 +20,12 @@ pub enum AppError {
 
     #[error("Failed to serialize TOML: {0}")]
     TomlSerialize(#[from] toml::ser::Error),
+
+    #[error("Interactive search failed: {0}")]
+    InteractiveError(String),
+
+    #[error("Interactive mode requires a terminal")]
+    NoTerminal,
 }
 
 pub type Result<T> = std::result::Result<T, AppError>;
