@@ -9,6 +9,7 @@ pub struct Theme {
 }
 
 impl Theme {
+    /// Creates a Theme from a file path.
     pub fn from_path(path: &Path) -> Option<Self> {
         let file_stem = path.file_stem()?.to_str()?;
         Some(Theme {
@@ -18,14 +19,12 @@ impl Theme {
     }
 }
 
-pub fn list_themes() -> Result<Vec<Theme>> {
-    // ~/.config/alacritty/themes/themes
-    let themes_dir = get_themes_dir()?;
+/// Lists all available themes from the themes directory.
+pub fn list_themes(custom_path: Option<&Path>) -> Result<Vec<Theme>> {
+    let themes_dir = get_themes_dir(custom_path)?;
 
     let mut themes: Vec<Theme> = std::fs::read_dir(themes_dir)?
-        // verify the directory exists
         .filter_map(|entry| entry.ok())
-        // filter .toml files
         .filter(|entry| {
             entry
                 .path()
@@ -33,7 +32,6 @@ pub fn list_themes() -> Result<Vec<Theme>> {
                 .map(|ext| ext == "toml")
                 .unwrap_or(false)
         })
-        // get the name of each theme
         .filter_map(|entry| Theme::from_path(&entry.path()))
         .collect();
 
@@ -42,7 +40,8 @@ pub fn list_themes() -> Result<Vec<Theme>> {
     Ok(themes)
 }
 
-pub fn get_current_theme() -> Result<Option<Theme>> {
+/// Gets the currently active theme from the Alacritty config.
+pub fn get_current_theme(custom_path: Option<&Path>) -> Result<Option<Theme>> {
     let config_path = get_alacritty_config_path()?;
 
     if !config_path.exists() {
@@ -57,7 +56,7 @@ pub fn get_current_theme() -> Result<Option<Theme>> {
 
     let theme_path = &config.general.import[0];
     let theme_path = PathBuf::from(theme_path);
-    let themes = list_themes()?;
+    let themes = list_themes(custom_path)?;
 
     if let Some(theme) = themes.iter().find(|&t| t.path == theme_path) {
         return Ok(Some(theme.clone()));
@@ -74,8 +73,9 @@ pub fn get_current_theme() -> Result<Option<Theme>> {
     }))
 }
 
-pub fn get_theme_by_name(name: &str) -> Result<Theme> {
-    let themes = list_themes()?;
+/// Looks up a theme by name (exact match or case-insensitive).
+pub fn get_theme_by_name(name: &str, custom_path: Option<&Path>) -> Result<Theme> {
+    let themes = list_themes(custom_path)?;
 
     if let Some(theme) = themes.iter().find(|t| t.name == name) {
         return Ok(theme.clone());
@@ -87,4 +87,97 @@ pub fn get_theme_by_name(name: &str) -> Result<Theme> {
     }
 
     Err(AppError::ThemeNotFound(name.to_string()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use tempfile::TempDir;
+
+    fn create_temp_dir(files: &[&str]) -> TempDir {
+        let dir = tempfile::tempdir().unwrap();
+        for file in files {
+            let path = dir.path().join(format!("{}.toml", file));
+            fs::write(&path, "").unwrap();
+        }
+        dir
+    }
+
+    #[test]
+    fn theme_from_path_extracts_name_from_filename() {
+        let dir = create_temp_dir(&["dracula", "nord"]);
+        let theme_path = dir.path().join("dracula.toml");
+
+        let theme = Theme::from_path(&theme_path).expect("Should parse theme");
+
+        assert_eq!(theme.name, "dracula");
+        assert_eq!(theme.path, theme_path);
+    }
+
+    #[test]
+    fn theme_from_path_works_on_any_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("theme.toml");
+        fs::write(&path, "").unwrap();
+
+        let result = Theme::from_path(&path);
+
+        assert!(result.is_some());
+        assert_eq!(result.unwrap().name, "theme");
+    }
+
+    #[test]
+    fn theme_name_preserves_original_case() {
+        let dir = create_temp_dir(&["SolarizedDark"]);
+        let theme_path = dir.path().join("SolarizedDark.toml");
+
+        let theme = Theme::from_path(&theme_path).expect("Should parse theme");
+
+        assert_eq!(theme.name, "SolarizedDark");
+    }
+
+    #[test]
+    fn list_themes_filters_only_toml_files() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join("valid.toml"), "").unwrap();
+        fs::write(dir.path().join("readme.txt"), "").unwrap();
+        fs::write(dir.path().join("config.yml"), "").unwrap();
+
+        let themes = list_themes(Some(dir.path())).expect("Should list themes");
+
+        assert_eq!(themes.len(), 1);
+        assert_eq!(themes[0].name, "valid");
+    }
+
+    #[test]
+    fn get_theme_by_name_exact_match() {
+        let dir = create_temp_dir(&["dracula", "nord", "gruvbox"]);
+
+        let result = get_theme_by_name("dracula", Some(dir.path()));
+
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap().name, "dracula");
+    }
+
+    #[test]
+    fn get_theme_by_name_case_insensitive() {
+        let dir = create_temp_dir(&["Dracula", "Nord"]);
+
+        let result = get_theme_by_name("dracula", Some(dir.path()));
+
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap().name, "Dracula");
+    }
+
+    #[test]
+    fn get_theme_by_name_not_found() {
+        let dir = create_temp_dir(&["dracula"]);
+
+        let result = get_theme_by_name("nonexistent", Some(dir.path()));
+
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("nonexistent"));
+    }
 }

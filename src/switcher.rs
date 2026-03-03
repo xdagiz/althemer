@@ -1,15 +1,18 @@
+use std::path::Path;
+
 use crate::{
     config::{get_alacritty_config_path, read_config, write_config},
-    error::{AppError, Result},
+    error::Result,
     themes::{Theme, get_theme_by_name},
 };
 
-pub fn switch_theme(name: &str) -> Result<Theme> {
-    let theme = get_theme_by_name(name)?;
+/// Switches the active Alacritty theme by updating the config file.
+pub fn switch_theme(name: &str, custom_theme_path: Option<&Path>) -> Result<Theme> {
+    let theme = get_theme_by_name(name, custom_theme_path)?;
     let config_path = get_alacritty_config_path()?;
 
     if !config_path.exists() {
-        return Err(AppError::ConfigNotFound(config_path));
+        return Err(crate::error::AppError::ConfigNotFound(config_path));
     }
 
     let mut config = read_config(&config_path)?;
