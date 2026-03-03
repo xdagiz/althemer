@@ -1,4 +1,4 @@
-use crate::config::{get_alacritty_config_dir, get_themes_dir, read_config};
+use crate::config::{get_alacritty_config_path, get_themes_dir, read_config};
 use crate::error::{AppError, Result};
 use std::path::{Path, PathBuf};
 
@@ -43,13 +43,12 @@ pub fn list_themes() -> Result<Vec<Theme>> {
 }
 
 pub fn get_current_theme() -> Result<Option<Theme>> {
-    let config_path = get_alacritty_config_dir()?;
+    let config_path = get_alacritty_config_path()?;
 
     if !config_path.exists() {
         return Err(AppError::ConfigNotFound(config_path));
     }
 
-    let config_path = config_path.join("alacritty.toml");
     let config = read_config(&config_path)?;
 
     if config.general.import.is_empty() {
@@ -73,4 +72,19 @@ pub fn get_current_theme() -> Result<Option<Theme>> {
             .to_string(),
         path: theme_path,
     }))
+}
+
+pub fn get_theme_by_name(name: &str) -> Result<Theme> {
+    let themes = list_themes()?;
+
+    if let Some(theme) = themes.iter().find(|t| t.name == name) {
+        return Ok(theme.clone());
+    }
+
+    let name_lower = name.to_lowercase();
+    if let Some(theme) = themes.iter().find(|t| t.name.to_lowercase() == name_lower) {
+        return Ok(theme.clone());
+    }
+
+    Err(AppError::ThemeNotFound(name.to_string()))
 }

@@ -26,6 +26,10 @@ pub fn get_alacritty_config_dir() -> Result<PathBuf> {
         .ok_or_else(|| AppError::ConfigNotFound(PathBuf::from("~/.config/alacritty")))
 }
 
+pub fn get_alacritty_config_path() -> Result<PathBuf> {
+    Ok(get_alacritty_config_dir()?.join("alacritty.toml"))
+}
+
 pub fn get_themes_dir() -> Result<PathBuf> {
     // ~/.config/alacritty/themes/themes
     let themes_dir = get_alacritty_config_dir()?.join("themes").join("themes");
@@ -41,4 +45,10 @@ pub fn read_config(path: &Path) -> Result<AlacrittyConfig> {
     let content = std::fs::read_to_string(path)?;
     let config = toml::from_str::<AlacrittyConfig>(&content)?;
     Ok(config)
+}
+
+pub fn write_config(path: &PathBuf, config: &AlacrittyConfig) -> Result<()> {
+    let content = toml::to_string_pretty(config)?;
+    std::fs::write(path, content)?;
+    Ok(())
 }

@@ -1,6 +1,9 @@
 use clap::{Parser, Subcommand};
 
-use crate::themes::{get_current_theme, list_themes};
+use crate::{
+    switcher::switch_theme,
+    themes::{get_current_theme, list_themes},
+};
 
 #[derive(Parser)]
 #[command(name = "alacritty-theme-switcher")]
@@ -36,6 +39,16 @@ impl Cli {
                     std::process::exit(1);
                 }
             },
+
+            Switch { theme } => match switch_theme(theme) {
+                Ok(theme) => {
+                    println!("✓ Switched to theme: {}", theme.name);
+                }
+                Err(e) => {
+                    eprintln!("Error: {}", e);
+                    std::process::exit(1);
+                }
+            },
         }
 
         cli
@@ -46,4 +59,8 @@ impl Cli {
 pub enum Commands {
     List,
     Current,
+    Switch {
+        #[arg()]
+        theme: String,
+    },
 }

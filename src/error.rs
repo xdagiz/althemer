@@ -11,12 +11,15 @@ pub enum AppError {
 
     #[error("Themes directory not found at: {0}")]
     ThemesDirNotFound(PathBuf),
+
+    #[error("Theme not found: {0}")]
+    ThemeNotFound(String),
+
+    #[error("Failed to parse TOML: {0}")]
+    TomlParse(#[from] toml::de::Error),
+
+    #[error("Failed to serialize TOML: {0}")]
+    TomlSerialize(#[from] toml::ser::Error),
 }
 
 pub type Result<T> = std::result::Result<T, AppError>;
-
-impl From<toml::de::Error> for AppError {
-    fn from(err: toml::de::Error) -> Self {
-        AppError::DirectoryRead(io::Error::new(io::ErrorKind::InvalidData, err.to_string()))
-    }
-}
