@@ -1,5 +1,22 @@
+use serde::{Deserialize, Serialize};
+
 use crate::error::{AppError, Result};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AlacrittyConfig {
+    #[serde(default)]
+    pub general: GeneralConfig,
+
+    #[serde(flatten)]
+    pub other: toml::Value,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct GeneralConfig {
+    #[serde(default)]
+    pub import: Vec<String>,
+}
 
 pub fn get_alacritty_config_dir() -> Result<PathBuf> {
     // ~/.config
@@ -18,4 +35,10 @@ pub fn get_themes_dir() -> Result<PathBuf> {
     }
 
     Ok(themes_dir)
+}
+
+pub fn read_config(path: &Path) -> Result<AlacrittyConfig> {
+    let content = std::fs::read_to_string(path)?;
+    let config = toml::from_str::<AlacrittyConfig>(&content)?;
+    Ok(config)
 }

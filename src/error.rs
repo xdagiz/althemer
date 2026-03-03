@@ -14,3 +14,9 @@ pub enum AppError {
 }
 
 pub type Result<T> = std::result::Result<T, AppError>;
+
+impl From<toml::de::Error> for AppError {
+    fn from(err: toml::de::Error) -> Self {
+        AppError::DirectoryRead(io::Error::new(io::ErrorKind::InvalidData, err.to_string()))
+    }
+}
