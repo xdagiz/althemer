@@ -21,7 +21,7 @@ pub fn pick_theme(themes: &[Theme], current: Option<&Theme>) -> Option<Theme> {
     let items: Vec<String> = sorted_themes
         .iter()
         .map(|t| {
-            if current.map(|c| c.name == t.name).unwrap_or(false) {
+            if current.is_some_and(|c| c.name == t.name) {
                 format!("{} ●", t.name)
             } else {
                 t.name.clone()
@@ -39,7 +39,7 @@ pub fn pick_theme(themes: &[Theme], current: Option<&Theme>) -> Option<Theme> {
 
     if let Ok(Some(selection)) = picker.pick() {
         let name = selection.trim_end_matches(" ●");
-        sorted_themes.iter().find(|t| t.name == name).cloned()
+        sorted_themes.into_iter().find(|t| t.name == name)
     } else {
         println!("No theme selected");
         None

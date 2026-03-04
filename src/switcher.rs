@@ -20,8 +20,8 @@ pub fn switch_theme(name: &str, custom_theme_path: Option<&Path>) -> Result<Them
     }
 
     let mut config = read_config(&config_path)?;
-    let theme_path_str = theme.path.to_string_lossy().to_string();
-    config.general.import = vec![theme_path_str];
+    let theme_path_str = theme.path.to_string_lossy();
+    config.general.import = vec![theme_path_str.to_string()];
 
     write_config(&config_path, &config)?;
 
@@ -43,9 +43,9 @@ pub fn select_theme(custom_path: Option<&Path>) -> Result<Option<Theme>> {
 
     if themes.len() == 1 {
         let theme = &themes[0];
-        switch_theme(&theme.name, custom_path)?;
+        let switched = switch_theme(&theme.name, custom_path)?;
         println!("✓ Only one theme available. Switched to: {}", theme.name);
-        return Ok(Some(theme.clone()));
+        return Ok(Some(switched));
     }
 
     let current_theme = get_current_theme(custom_path).ok().flatten();
