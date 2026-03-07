@@ -26,6 +26,9 @@ pub enum AppError {
 
     #[error("Interactive mode requires a terminal")]
     NoTerminal,
+
+    #[error("Failed to render preview: {0}")]
+    PreviewError(String),
 }
 
 pub type Result<T> = std::result::Result<T, AppError>;

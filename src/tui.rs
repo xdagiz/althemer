@@ -1,15 +1,16 @@
 use crate::switcher::switch_theme;
-use crate::themes::{Theme, list_themes};
+use crate::themes::{Theme, ThemeColors, list_themes};
 use crossterm::event::{self, KeyCode, KeyEvent, KeyModifiers};
+use ratatui::widgets::Padding;
 use ratatui::{
     DefaultTerminal,
     buffer::Buffer,
-    layout::{Alignment, Constraint, Flex, Layout, Rect},
+    layout::{Alignment, Constraint, Layout, Rect},
     style::{Color, Modifier, Style, Stylize},
     text::{Line, Span},
     widgets::{
-        Block, BorderType, HighlightSpacing, List, ListItem, ListState, Padding, Paragraph,
-        StatefulWidget, Widget, Wrap,
+        Block, BorderType, HighlightSpacing, List, ListItem, ListState, Paragraph, StatefulWidget,
+        Widget, Wrap,
     },
 };
 use std::path::{Path, PathBuf};
@@ -27,7 +28,6 @@ const SELECTED_STYLE: Style = Style::new()
 pub struct App {
     should_exit: bool,
     themes: ThemesList,
-    show_help: bool,
     status_message: Option<String>,
     custom_themes_path: Option<PathBuf>,
 }
@@ -59,7 +59,6 @@ impl App {
         Self {
             should_exit: false,
             themes: ThemesList { items, state },
-            show_help: false,
             status_message,
             custom_themes_path: custom_themes_path.map(Path::to_path_buf),
         }
@@ -72,6 +71,7 @@ impl App {
                 self.handle_key(key);
             }
         }
+
         Ok(())
     }
 
@@ -80,8 +80,7 @@ impl App {
             KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 self.should_exit = true
             }
-            KeyCode::Char('q') | KeyCode::Esc => self.should_exit = true,
-            KeyCode::Char('?') => self.show_help = !self.show_help,
+            KeyCode::Char('q') => self.should_exit = true,
             KeyCode::Char('j') | KeyCode::Down => self.select_next(),
             KeyCode::Char('k') | KeyCode::Up => self.select_previous(),
             KeyCode::Char('g') | KeyCode::Home => self.select_first(),
@@ -132,21 +131,12 @@ impl App {
 
 impl Widget for &mut App {
     fn render(self, area: Rect, buf: &mut Buffer) {
-        let main_layout = Layout::vertical([
-            Constraint::Length(2),
-            Constraint::Fill(1),
-            Constraint::Length(1),
-        ]);
-        let [header_area, content_area, footer_area] = area.layout(&main_layout);
+        let main_layout = Layout::vertical([Constraint::Fill(1), Constraint::Length(1)]);
+        let [content_area, footer_area] = area.layout(&main_layout);
 
         let content_layout = Layout::horizontal([Constraint::Percentage(30), Constraint::Fill(1)]);
         let [list_area, item_area] = content_area.layout(&content_layout);
 
-        if self.show_help {
-            App::render_help(area, buf);
-        }
-
-        App::render_header(header_area, buf);
         self.render_footer(footer_area, buf);
         self.render_list(list_area, buf);
         self.render_selected_item(item_area, buf);
@@ -155,29 +145,18 @@ impl Widget for &mut App {
 
 /// Rendering logic for the app
 impl App {
-    fn render_header(area: Rect, buf: &mut Buffer) {
-        Paragraph::new("Althemer - Alacritty Theme Switcher")
-            .bold()
-            .centered()
-            .render(area, buf);
-    }
-
     fn render_footer(&mut self, area: Rect, buf: &mut Buffer) {
         let mut left_spans: Vec<Span> = vec![];
-        match self.themes.state.selected() {
-            Some(i) => match self.themes.items.get(i) {
-                Some(theme) => {
-                    left_spans.extend(vec![Span::styled(
-                        format!(" {} ", theme.path.display()),
-                        Style::default().fg(TEXT_COLOR).bg(SURFACE_COLOR),
-                    )]);
-                }
-                None => todo!(),
-            },
-            None => todo!(),
+        if let Some(i) = self.themes.state.selected()
+            && let Some(theme) = self.themes.items.get(i)
+        {
+            left_spans.extend(vec![Span::styled(
+                format!(" {} ", theme.path.display()),
+                Style::default().fg(TEXT_COLOR).bg(SURFACE_COLOR),
+            )]);
         }
 
-        let right_span = Span::styled(" ? help ", Style::default().fg(SUBTEXT_COLOR));
+        let right_span = Span::styled("Enter: Apply", Style::default().fg(SUBTEXT_COLOR));
         let right_line = Line::from(right_span);
 
         let footer_layout = Layout::horizontal([
@@ -192,7 +171,7 @@ impl App {
 
     fn render_list(&mut self, area: Rect, buf: &mut Buffer) {
         let block = Block::bordered()
-            .title(Line::raw("Themes").left_aligned())
+            .title(Line::raw(" Themes ").left_aligned())
             .border_type(BorderType::Rounded);
 
         let items: Vec<ListItem> = self
@@ -205,64 +184,68 @@ impl App {
         let list = List::new(items)
             .block(block)
             .highlight_style(SELECTED_STYLE)
-            .highlight_symbol("> ")
+            .highlight_symbol(" ")
             .highlight_spacing(HighlightSpacing::Always);
 
         StatefulWidget::render(list, area, buf, &mut self.themes.state);
     }
 
-    fn render_selected_item(&self, area: Rect, buf: &mut Buffer) {
-        match self.themes.state.selected() {
-            Some(i) => match self.themes.items.get(i) {
-                Some(theme) => {
-                    let colors = &theme.colors;
-
-                    let block = Block::bordered()
-                        .border_type(BorderType::Rounded)
-                        .title(Line::raw("Preview").left_aligned())
-                        .padding(Padding::new(1, 2, 1, 2))
-                        .bg(colors.background());
-
-                    let text = vec![
-                        Line::from(vec![
-                            Span::from("󰣇 ").fg(colors.foreground()),
-                            Span::from("althemer ").fg(colors.blue()),
-                            Span::from(" main ").fg(colors.green()),
-                            Span::from(" v1.92.0 ").fg(colors.cyan()),
-                        ]),
-                        Line::from(vec![
-                            Span::from("❯ ").fg(colors.magenta()),
-                            Span::from("echo ").fg(colors.foreground()),
-                            Span::from("'Alacritty is awesome!'").fg(colors.yellow()),
-                            Span::from("█").fg(colors.cursor()),
-                        ]),
-                    ];
-
-                    Paragraph::new(text)
-                        .block(block)
-                        .alignment(Alignment::Left)
-                        .wrap(Wrap { trim: true })
-                        .render(area, buf);
+    fn render_selected_item(&mut self, area: Rect, buf: &mut Buffer) {
+        if let Some(i) = self.themes.state.selected()
+            && let Some(theme) = self.themes.items.get(i)
+        {
+            let colors = match ThemeColors::from_path(&theme.path) {
+                Ok(c) => c,
+                Err(err) => {
+                    self.status_message = Some(format!("Failed to load preview: {err}"));
+                    return;
                 }
-                None => todo!(),
-            },
-            None => todo!(),
+            };
+
+            let bg = colors.background();
+            let fg = colors.foreground();
+            let blue = colors.blue();
+            let green = colors.green();
+            let cyan = colors.cyan();
+            let yellow = colors.yellow();
+            let magenta = colors.magenta();
+
+            let block = Block::bordered()
+                .border_type(BorderType::Rounded)
+                .padding(Padding::new(
+                    area.height / 4, // top
+                    area.width / 8,  // right
+                    area.height / 8, // bottom
+                    area.width / 4,  // left
+                ))
+                .title(Line::raw(" Preview ").left_aligned());
+
+            let text = vec![
+                Line::from(vec![
+                    Span::from("󰣇 ").fg(fg),
+                    Span::from("althemer ").fg(blue),
+                    Span::from(" main ").fg(green),
+                    Span::from(" v1.92.0 ").fg(cyan),
+                ]),
+                Line::from(vec![
+                    Span::from("❯ ").fg(magenta),
+                    Span::from("echo ").fg(fg),
+                    Span::from("'Alacritty is awesome!'").fg(yellow),
+                    Span::from("█").fg(colors.cursor_text()),
+                ]),
+            ];
+
+            let mut inner_area = block.inner(area);
+            inner_area.height = 20;
+
+            let inner_block = Block::new().bg(bg).padding(Padding::proportional(1));
+
+            block.render(area, buf);
+            Paragraph::new(text)
+                .block(inner_block)
+                .alignment(Alignment::Left)
+                .wrap(Wrap { trim: true })
+                .render(inner_area, buf);
         }
     }
-
-    fn render_help(area: Rect, buf: &mut Buffer) {
-        let block = Block::bordered()
-            .border_type(BorderType::Rounded)
-            .title("Keymaps");
-        let area = popup_area(area, 30, 60);
-        block.render(area, buf);
-    }
-}
-
-fn popup_area(area: Rect, percent_x: u16, percent_y: u16) -> Rect {
-    let vertical = Layout::vertical([Constraint::Percentage(percent_y)]).flex(Flex::Center);
-    let horizontal = Layout::horizontal([Constraint::Percentage(percent_x)]).flex(Flex::Center);
-    let [area] = vertical.areas(area);
-    let [area] = horizontal.areas(area);
-    area
 }

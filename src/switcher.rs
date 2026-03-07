@@ -50,6 +50,10 @@ pub fn select_theme(custom_path: Option<&Path>) -> Result<Option<Theme>> {
 
     let current_theme = get_current_theme(custom_path).ok().flatten();
 
+    if current_theme.is_none() {
+        eprintln!("Warning: Could not determine current theme");
+    }
+
     let selected_theme = pick_theme(&themes, current_theme.as_ref())
         .ok_or_else(|| AppError::InteractiveError("No theme selected".to_string()))?;
 
