@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::error::{AppError, Result};
+use dirs::config_dir;
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -20,7 +21,7 @@ pub struct GeneralConfig {
 
 /// Returns the Alacritty config directory (~/.config/alacritty).
 pub fn get_alacritty_config_dir() -> Result<PathBuf> {
-    dirs::config_dir()
+    config_dir()
         .map(|p| p.join("alacritty"))
         .ok_or_else(|| AppError::ConfigNotFound(PathBuf::from("~/.config/alacritty")))
 }

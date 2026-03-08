@@ -44,6 +44,7 @@ struct ThemesList {
     filtered_indices: Vec<usize>,
     selected: usize,
     scroll: usize,
+    cached_colors: Option<ThemeColors>,
 }
 
 enum InputMode {
@@ -73,6 +74,7 @@ impl App {
                 filtered_indices,
                 selected: 0,
                 scroll: 0,
+                cached_colors: None,
             },
             status_message,
             custom_themes_path: custom_themes_path.map(Path::to_path_buf),
@@ -278,6 +280,7 @@ impl App {
 
         if !self.themes.filtered_indices.contains(&old_selected) {
             self.themes.selected = *self.themes.filtered_indices.first().unwrap_or(&0);
+            self.update_cached_colors();
         }
 
         self.adjust_scroll(area);
@@ -313,6 +316,7 @@ impl App {
         let pos = self.filtered_pos();
         if pos + 1 < self.themes.filtered_indices.len() {
             self.themes.selected = self.themes.filtered_indices[pos + 1];
+            self.update_cached_colors();
             self.adjust_scroll(area);
         }
     }
@@ -321,6 +325,7 @@ impl App {
         let pos = self.filtered_pos();
         if pos > 0 {
             self.themes.selected = self.themes.filtered_indices[pos - 1];
+            self.update_cached_colors();
             if pos - 1 < self.themes.scroll {
                 self.themes.scroll = pos - 1;
             }
@@ -328,31 +333,47 @@ impl App {
     }
 
     fn page_down(&mut self, area: Rect) {
-        let vis = self.visible_count(area);
+        let vis = self.visible_count(area) / 2;
         let pos = self.filtered_pos();
         let new_pos = (pos + vis).min(self.themes.filtered_indices.len() - 1);
         self.themes.selected = self.themes.filtered_indices[new_pos];
-        self.adjust_scroll(area);
+        self.update_cached_colors();
+        let max_scroll = self
+            .themes
+            .filtered_indices
+            .len()
+            .saturating_sub(self.visible_count(area));
+        self.themes.scroll = (new_pos + 1)
+            .saturating_sub(self.visible_count(area))
+            .min(max_scroll);
     }
 
     fn page_up(&mut self, area: Rect) {
-        let vis = self.visible_count(area);
+        let vis = self.visible_count(area) / 2;
         let pos = self.filtered_pos();
         let new_pos = pos.saturating_sub(vis);
         self.themes.selected = self.themes.filtered_indices[new_pos];
-        self.adjust_scroll(area);
+        self.update_cached_colors();
+        self.themes.scroll = new_pos.min(
+            self.themes
+                .filtered_indices
+                .len()
+                .saturating_sub(self.visible_count(area)),
+        );
     }
 
     fn select_first(&mut self) {
         if let Some(&idx) = self.themes.filtered_indices.first() {
             self.themes.selected = idx;
             self.themes.scroll = 0;
+            self.update_cached_colors();
         }
     }
 
     fn select_last(&mut self, area: Rect) {
         if let Some(&idx) = self.themes.filtered_indices.last() {
             self.themes.selected = idx;
+            self.update_cached_colors();
             self.adjust_scroll(area);
         }
     }
@@ -370,6 +391,15 @@ impl App {
                 self.status_message = Some(format!("Failed to apply theme: {err}"));
             }
         }
+    }
+
+    fn update_cached_colors(&mut self) {
+        let Some(theme) = self.themes.items.get(self.themes.selected) else {
+            self.themes.cached_colors = None;
+            return;
+        };
+
+        self.themes.cached_colors = ThemeColors::from_path(&theme.path).ok();
     }
 }
 
@@ -457,11 +487,17 @@ impl App {
             return;
         };
 
-        let colors = match ThemeColors::from_path(&theme.path) {
-            Ok(c) => c,
-            Err(err) => {
-                self.status_message = Some(format!("Failed to load preview: {err}"));
-                return;
+        let colors = match &self.themes.cached_colors {
+            Some(c) => c,
+            None => {
+                self.themes.cached_colors = ThemeColors::from_path(&theme.path).ok();
+                match &self.themes.cached_colors {
+                    Some(c) => c,
+                    None => {
+                        self.status_message = Some("Failed to load preview".to_string());
+                        return;
+                    }
+                }
             }
         };
 
@@ -479,14 +515,14 @@ impl App {
                 area.height / 4,
                 area.width / 8,
                 area.height / 8,
-                area.width / 4,
+                area.width / 6,
             ))
-            .title(Line::raw(" Preview ").left_aligned());
+            .title(Line::raw(" Preview ").centered());
 
         let text = vec![
             Line::from(vec![
                 Span::from("󰣇 ").fg(fg),
-                Span::from("althemer ").fg(blue),
+                Span::from("~/althemer ").fg(blue),
                 Span::from(" main ").fg(green),
                 Span::from(" v1.92.0 ").fg(cyan),
             ]),
@@ -500,7 +536,7 @@ impl App {
 
         let mut inner_area = block.inner(area);
         let inner_block = Block::new().bg(bg).padding(Padding::proportional(1));
-        inner_area.height = 20;
+        inner_area.height = inner_area.height.max(16).min(area.height.saturating_sub(4));
 
         block.render(area, buf);
         Paragraph::new(text)

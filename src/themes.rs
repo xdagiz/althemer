@@ -180,6 +180,11 @@ pub fn get_current_theme(custom_path: Option<&Path>) -> Result<Option<Theme>> {
 
 /// Looks up a theme by name (exact match or case-insensitive).
 pub fn get_theme_by_name(name: &str, custom_path: Option<&Path>) -> Result<Theme> {
+    let name = name.trim();
+    if name.is_empty() {
+        return Err(AppError::ThemeNotFound(name.to_string()));
+    }
+
     let themes = list_themes(custom_path)?;
 
     // Try exact match first, then case-insensitive
