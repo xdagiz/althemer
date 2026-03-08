@@ -34,7 +34,8 @@ pub struct App {
 
 struct ThemesList {
     items: Vec<Theme>,
-    state: ListState,
+    selected: usize,
+    scroll: usize,
 }
 
 impl Default for App {
@@ -51,14 +52,13 @@ impl App {
             Err(err) => (Vec::new(), Some(format!("Failed to load themes: {err}"))),
         };
 
-        let mut state = ListState::default();
-        if !items.is_empty() {
-            state.select_first();
-        }
-
         Self {
             should_exit: false,
-            themes: ThemesList { items, state },
+            themes: ThemesList {
+                items,
+                selected: 0,
+                scroll: 0,
+            },
             status_message,
             custom_themes_path: custom_themes_path.map(Path::to_path_buf),
         }
@@ -66,51 +66,103 @@ impl App {
 
     pub fn run(mut self, terminal: &mut DefaultTerminal) -> io::Result<()> {
         while !self.should_exit {
-            terminal.draw(|frame| frame.render_widget(&mut self, frame.area()))?;
+            let area = Rect::from(terminal.size()?);
+            terminal.draw(|frame| frame.render_widget(&mut self, area))?;
             if let Some(key) = event::read()?.as_key_press_event() {
-                self.handle_key(key);
+                self.handle_key(key, area);
             }
         }
 
         Ok(())
     }
 
-    fn handle_key(&mut self, key: KeyEvent) {
+    fn handle_key(&mut self, key: KeyEvent, area: Rect) {
         match key.code {
             KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 self.should_exit = true
             }
             KeyCode::Char('q') => self.should_exit = true,
-            KeyCode::Char('j') | KeyCode::Down => self.select_next(),
+            KeyCode::Char('j') | KeyCode::Down => self.select_next(area),
             KeyCode::Char('k') | KeyCode::Up => self.select_previous(),
+            KeyCode::PageDown | KeyCode::Char('d')
+                if key.modifiers.contains(KeyModifiers::CONTROL) =>
+            {
+                self.page_down(area)
+            }
+            KeyCode::PageUp | KeyCode::Char('u')
+                if key.modifiers.contains(KeyModifiers::CONTROL) =>
+            {
+                self.page_up(area)
+            }
             KeyCode::Char('g') | KeyCode::Home => self.select_first(),
-            KeyCode::Char('G') | KeyCode::End => self.select_last(),
+            KeyCode::Char('G') | KeyCode::End => self.select_last(area),
             KeyCode::Enter => self.confirm_selection(),
             _ => {}
         }
     }
 
-    fn select_next(&mut self) {
-        self.themes.state.select_next();
+    fn visible_height(&self, area: Rect) -> usize {
+        area.height.saturating_sub(2) as usize
+    }
+
+    fn max_scroll(&self, visible_height: usize) -> usize {
+        self.themes.items.len().saturating_sub(visible_height)
+    }
+
+    fn select_next(&mut self, area: Rect) {
+        let vis = self.visible_height(area);
+        let max = self.max_scroll(vis);
+
+        if self.themes.selected < self.themes.items.len() - 1 {
+            self.themes.selected += 1;
+
+            if self.themes.selected >= self.themes.scroll + vis {
+                self.themes.scroll = (self.themes.selected - vis + 1).min(max);
+            }
+        }
     }
 
     fn select_previous(&mut self) {
-        self.themes.state.select_previous();
+        if self.themes.selected > 0 {
+            self.themes.selected -= 1;
+
+            if self.themes.selected < self.themes.scroll {
+                self.themes.scroll = self.themes.selected;
+            }
+        }
+    }
+
+    fn page_down(&mut self, area: Rect) {
+        let vis = self.visible_height(area);
+        let max = self.max_scroll(vis);
+
+        self.themes.selected = (self.themes.selected + vis).min(self.themes.items.len() - 1);
+        self.themes.scroll = (self.themes.scroll + vis).min(max);
+    }
+
+    fn page_up(&mut self, area: Rect) {
+        let vis = self.visible_height(area);
+
+        self.themes.selected = self.themes.selected.saturating_sub(vis);
+        self.themes.scroll = self.themes.scroll.saturating_sub(vis);
     }
 
     fn select_first(&mut self) {
-        self.themes.state.select_first();
+        self.themes.selected = 0;
+        self.themes.scroll = 0;
     }
 
-    fn select_last(&mut self) {
-        self.themes.state.select_last();
+    fn select_last(&mut self, area: Rect) {
+        let vis = self.visible_height(area);
+        let max = self.max_scroll(vis);
+
+        self.themes.selected = self.themes.items.len().saturating_sub(1);
+        self.themes.scroll = max;
     }
 
     /// Applies the currently selected theme.
     fn confirm_selection(&mut self) {
-        let Some(index) = self.themes.state.selected() else {
-            return;
-        };
+        let index = self.themes.selected;
 
         let Some(theme) = self.themes.items.get(index) else {
             return;
@@ -147,8 +199,8 @@ impl Widget for &mut App {
 impl App {
     fn render_footer(&mut self, area: Rect, buf: &mut Buffer) {
         let mut left_spans: Vec<Span> = vec![];
-        if let Some(i) = self.themes.state.selected()
-            && let Some(theme) = self.themes.items.get(i)
+        if !self.themes.items.is_empty()
+            && let Some(theme) = self.themes.items.get(self.themes.selected)
         {
             left_spans.extend(vec![Span::styled(
                 format!(" {} ", theme.path.display()),
@@ -174,25 +226,35 @@ impl App {
             .title(Line::raw(" Themes ").left_aligned())
             .border_type(BorderType::Rounded);
 
-        let items: Vec<ListItem> = self
+        let vis = self.visible_height(area);
+
+        // Slice items to visible range using scroll offset
+        let visible_items: Vec<ListItem> = self
             .themes
             .items
             .iter()
+            .skip(self.themes.scroll)
+            .take(vis)
             .map(|theme| ListItem::new(theme.name.as_str()))
             .collect();
 
-        let list = List::new(items)
+        let list = List::new(visible_items)
             .block(block)
             .highlight_style(SELECTED_STYLE)
-            .highlight_symbol(" ")
+            .highlight_symbol("❯ ")
             .highlight_spacing(HighlightSpacing::Always);
 
-        StatefulWidget::render(list, area, buf, &mut self.themes.state);
+        // Create temporary ListState for highlighting the selected item
+        let mut temp_state = ListState::default();
+        let relative_selected = self.themes.selected.saturating_sub(self.themes.scroll);
+        temp_state.select(Some(relative_selected));
+
+        StatefulWidget::render(list, area, buf, &mut temp_state);
     }
 
     fn render_selected_item(&mut self, area: Rect, buf: &mut Buffer) {
-        if let Some(i) = self.themes.state.selected()
-            && let Some(theme) = self.themes.items.get(i)
+        if !self.themes.items.is_empty()
+            && let Some(theme) = self.themes.items.get(self.themes.selected)
         {
             let colors = match ThemeColors::from_path(&theme.path) {
                 Ok(c) => c,
