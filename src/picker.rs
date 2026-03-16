@@ -24,7 +24,7 @@ pub fn pick_theme(themes: &[Theme], current: Option<&Theme>) -> Option<Theme> {
             if current.is_some_and(|c| c.name == t.name) {
                 format!("{} ●", t.name)
             } else {
-                t.name.clone()
+                t.name.to_string()
             }
         })
         .collect();

@@ -5,9 +5,12 @@ mod switcher;
 mod themes;
 mod tui;
 
+use std::path::PathBuf;
+
 use clap::Parser;
 use config::{AlthemerConfig, Cli, Commands};
 use error::{AppError, Result};
+use inquire::Text;
 use switcher::{select_theme, switch_theme};
 use themes::{get_current_theme, list_themes};
 use tui::App;
@@ -15,7 +18,7 @@ use tui::App;
 fn main() -> Result<()> {
     let cli = Cli::parse();
 
-    let config = AlthemerConfig::load(cli.config.as_deref())?;
+    let mut config = AlthemerConfig::load(cli.config.as_deref())?;
     let themes_path = cli.themes.as_deref().or(config.themes_dir.as_deref());
     if cli.command.is_none() {
         return ratatui::run(|term| App::new(themes_path).run(term))
@@ -46,6 +49,18 @@ fn main() -> Result<()> {
         Some(Commands::Switch { theme }) => {
             let theme = switch_theme(theme, themes_path)?;
             println!("✓ Switched to theme: {}", theme.name);
+        }
+        Some(Commands::Configure) => {
+            let themes_dir = Text::new("Enter path to themes dir:")
+                .prompt()
+                .map_err(|e| AppError::ConfigurationError(e.to_string()))?;
+            if !themes_dir.is_empty() {
+                config.themes_dir = Some(PathBuf::from(&themes_dir));
+                config.save()?;
+                println!("✓ Successfully configured!");
+            } else {
+                println!("Nothing changed!");
+            }
         }
         None => unreachable!(),
     }

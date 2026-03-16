@@ -15,6 +15,9 @@ pub enum AppError {
     #[error("Theme not found: {0}")]
     ThemeNotFound(String),
 
+    #[error("Configuration error: {0}")]
+    ConfigurationError(String),
+
     #[error("Failed to parse TOML: {0}")]
     TomlParse(#[from] toml::de::Error),
 

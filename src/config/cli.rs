@@ -26,4 +26,5 @@ pub enum Commands {
         #[arg()]
         theme: String,
     },
+    Configure,
 }

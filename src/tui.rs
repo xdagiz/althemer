@@ -399,7 +399,13 @@ impl App {
             return;
         };
 
-        self.themes.cached_colors = ThemeColors::from_path(&theme.path).ok();
+        self.themes.cached_colors = match ThemeColors::from_path(&theme.path) {
+            Ok(c) => Some(c),
+            Err(e) => {
+                self.status_message = Some(format!("Failed to load preview: {e}"));
+                None
+            }
+        };
     }
 }
 
@@ -490,7 +496,13 @@ impl App {
         let colors = match &self.themes.cached_colors {
             Some(c) => c,
             None => {
-                self.themes.cached_colors = ThemeColors::from_path(&theme.path).ok();
+                self.themes.cached_colors = match ThemeColors::from_path(&theme.path) {
+                    Ok(c) => Some(c),
+                    Err(e) => {
+                        self.status_message = Some(format!("Failed to load preview: {e}"));
+                        None
+                    }
+                };
                 match &self.themes.cached_colors {
                     Some(c) => c,
                     None => {
