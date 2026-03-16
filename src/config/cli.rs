@@ -6,7 +6,7 @@ use std::path::PathBuf;
 #[command(about = "A cli & tui to switch b/n alacritty themes", long_about = None)]
 #[command(version)]
 pub struct Cli {
-    /// Path to althemer config file (default: ~/.config/althemer/config.json)
+    /// Path to althemer config file [default: ~/.config/althemer/config.json]
     #[arg(long, global = true)]
     pub config: Option<PathBuf>,
 

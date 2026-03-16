@@ -2,7 +2,7 @@ use std::io;
 use std::path::PathBuf;
 
 #[derive(Debug, thiserror::Error)]
-pub enum AppError {
+pub enum AlthemerError {
     #[error("Failed to read directory: {0}")]
     DirectoryRead(#[from] io::Error),
 
@@ -37,4 +37,4 @@ pub enum AppError {
     PreviewError(String),
 }
 
-pub type Result<T> = std::result::Result<T, AppError>;
+pub type Result<T> = std::result::Result<T, AlthemerError>;

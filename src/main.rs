@@ -9,7 +9,7 @@ use std::path::PathBuf;
 
 use clap::Parser;
 use config::{AlthemerConfig, Cli, Commands};
-use error::{AppError, Result};
+use error::{AlthemerError, Result};
 use inquire::Text;
 use switcher::{select_theme, switch_theme};
 use themes::{get_current_theme, list_themes};
@@ -21,14 +21,17 @@ fn main() -> Result<()> {
     let mut config = AlthemerConfig::load(cli.config.as_deref())?;
     let themes_path = cli.themes.as_deref().or(config.themes_dir.as_deref());
     if cli.command.is_none() {
-        return ratatui::run(|term| App::new(themes_path).run(term))
-            .map_err(|e| AppError::InteractiveError(e.to_string()));
+        return ratatui::run(|term| App::new(themes_path, &config).run(term))
+            .map_err(|e| AlthemerError::InteractiveError(e.to_string()));
     }
 
     match &cli.command {
         Some(Commands::List) => match select_theme(themes_path) {
-            Ok(_) => {}
-            Err(AppError::NoTerminal) => {
+            Ok(t) => {
+                let theme = switch_theme(&t.name, themes_path)?;
+                println!("✓ Switched to theme: {}", theme.name);
+            }
+            Err(AlthemerError::NoTerminal) => {
                 let themes = list_themes(themes_path)?;
                 println!("Available themes ({} total):", themes.len());
                 for theme in themes {
@@ -53,7 +56,7 @@ fn main() -> Result<()> {
         Some(Commands::Configure) => {
             let themes_dir = Text::new("Enter path to themes dir:")
                 .prompt()
-                .map_err(|e| AppError::ConfigurationError(e.to_string()))?;
+                .map_err(|e| AlthemerError::ConfigurationError(e.to_string()))?;
             if !themes_dir.is_empty() {
                 config.themes_dir = Some(PathBuf::from(&themes_dir));
                 config.save()?;

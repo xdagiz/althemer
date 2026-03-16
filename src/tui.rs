@@ -1,3 +1,4 @@
+use crate::config::AlthemerConfig;
 use crate::switcher::switch_theme;
 use crate::themes::{Theme, ThemeColors, list_themes};
 use crossterm::{
@@ -14,8 +15,7 @@ use ratatui::{
     style::{Color, Modifier, Style, Stylize},
     text::{Line, Span},
     widgets::{
-        Block, BorderType, HighlightSpacing, List, ListItem, ListState, Paragraph, StatefulWidget,
-        Widget, Wrap,
+        Block, HighlightSpacing, List, ListItem, ListState, Paragraph, StatefulWidget, Widget, Wrap,
     },
 };
 use std::path::{Path, PathBuf};
@@ -37,6 +37,8 @@ pub struct App {
     input_mode: InputMode,
     filter_input: String,
     character_index: usize,
+    show_preview: bool,
+    quit_on_select: bool,
 }
 
 struct ThemesList {
@@ -54,12 +56,12 @@ enum InputMode {
 
 impl Default for App {
     fn default() -> Self {
-        Self::new(None)
+        Self::new(None, &AlthemerConfig::default())
     }
 }
 
 impl App {
-    pub fn new(custom_themes_path: Option<&Path>) -> Self {
+    pub fn new(custom_themes_path: Option<&Path>, config: &AlthemerConfig) -> Self {
         let (items, status_message) = match list_themes(custom_themes_path) {
             Ok(items) if items.is_empty() => (items, Some("No themes found".to_string())),
             Ok(items) => (items, None),
@@ -81,6 +83,8 @@ impl App {
             input_mode: InputMode::Normal,
             filter_input: String::new(),
             character_index: 0,
+            show_preview: config.show_preview,
+            quit_on_select: config.quit_on_select,
         }
     }
 
@@ -344,7 +348,7 @@ impl App {
             .len()
             .saturating_sub(self.visible_count(area));
         self.themes.scroll = (new_pos + 1)
-            .saturating_sub(self.visible_count(area))
+            .saturating_sub(self.visible_count(area) / 2)
             .min(max_scroll);
     }
 
@@ -391,6 +395,10 @@ impl App {
                 self.status_message = Some(format!("Failed to apply theme: {err}"));
             }
         }
+
+        if self.quit_on_select {
+            self.should_exit = true
+        }
     }
 
     fn update_cached_colors(&mut self) {
@@ -419,7 +427,9 @@ impl Widget for &mut App {
 
         self.render_footer(footer_area, buf);
         self.render_list(list_area, buf);
-        self.render_selected_item(item_area, buf);
+        if self.show_preview {
+            self.render_preview(item_area, buf);
+        }
     }
 }
 
@@ -429,7 +439,11 @@ impl App {
             InputMode::Normal => {
                 let mut left_spans: Vec<Span> = vec![];
                 if let Some(msg) = &self.status_message {
-                    left_spans.push(Span::from(msg).fg(Color::Red).bg(SURFACE_COLOR));
+                    left_spans.push(
+                        Span::from(format!(" {} ", msg))
+                            .fg(Color::Red)
+                            .bg(SURFACE_COLOR),
+                    );
                 } else if let Some(theme) = self.themes.items.get(self.themes.selected) {
                     left_spans.push(
                         Span::from(format!(" {} ", theme.path.display()))
@@ -438,7 +452,8 @@ impl App {
                     );
                 }
 
-                let right_span = Span::from("enter: apply • /: filter • q: quit").fg(SUBTEXT_COLOR);
+                let right_span =
+                    Span::from(" enter: apply • /: filter • q: quit ").fg(SUBTEXT_COLOR);
                 let right_line = Line::from(right_span);
 
                 let footer_layout = Layout::horizontal([
@@ -462,9 +477,7 @@ impl App {
     }
 
     fn render_list(&mut self, area: Rect, buf: &mut Buffer) {
-        let block = Block::bordered()
-            .title(Line::raw(" Themes ").left_aligned())
-            .border_type(BorderType::Rounded);
+        let block = Block::default().padding(Padding::uniform(1));
 
         let vis = block.inner(area).height as usize;
         let start = self.themes.scroll;
@@ -488,28 +501,14 @@ impl App {
         StatefulWidget::render(list, area, buf, &mut temp_state);
     }
 
-    fn render_selected_item(&mut self, area: Rect, buf: &mut Buffer) {
-        let Some(theme) = self.themes.items.get(self.themes.selected) else {
-            return;
-        };
+    fn render_preview(&mut self, area: Rect, buf: &mut Buffer) {
+        self.update_cached_colors();
 
         let colors = match &self.themes.cached_colors {
             Some(c) => c,
             None => {
-                self.themes.cached_colors = match ThemeColors::from_path(&theme.path) {
-                    Ok(c) => Some(c),
-                    Err(e) => {
-                        self.status_message = Some(format!("Failed to load preview: {e}"));
-                        None
-                    }
-                };
-                match &self.themes.cached_colors {
-                    Some(c) => c,
-                    None => {
-                        self.status_message = Some("Failed to load preview".to_string());
-                        return;
-                    }
-                }
+                self.status_message = Some("Failed to load preview".to_string());
+                return;
             }
         };
 
@@ -521,28 +520,36 @@ impl App {
         let yellow = colors.yellow();
         let magenta = colors.magenta();
 
-        let block = Block::bordered()
-            .border_type(BorderType::Rounded)
-            .padding(Padding::new(
-                area.height / 4,
-                area.width / 8,
-                area.height / 8,
-                area.width / 6,
-            ))
-            .title(Line::raw(" Preview ").centered());
+        let block = Block::default().padding(Padding::new(
+            area.height / 4,
+            area.width / 8,
+            area.height / 8,
+            area.width / 6,
+        ));
 
-        let text = vec![
-            Line::from(vec![
+        let prompt_line = Line::from(vec![
                 Span::from("󰣇 ").fg(fg),
                 Span::from("~/althemer ").fg(blue),
                 Span::from(" main ").fg(green),
                 Span::from(" v1.92.0 ").fg(cyan),
-            ]),
+        ]);
+        let text = vec![
+            prompt_line.clone(),
             Line::from(vec![
                 Span::from("❯ ").fg(magenta),
                 Span::from("echo ").fg(fg),
                 Span::from("'Alacritty is awesome!'").fg(yellow),
                 Span::from("█").fg(colors.cursor_text()),
+            ]),
+            Line::from("\n"),
+            prompt_line.clone(),
+            Line::from(vec![Span::from("❯ ").fg(magenta), Span::from("ls ").fg(fg)]),
+            Line::from(vec![
+                Span::from(" Cargo.lock  ").fg(fg),
+                Span::from(" Cargo.toml  ").fg(yellow),
+                Span::from("󰂺 README.md  ").fg(yellow),
+                Span::from("󰣞 src  ").fg(blue),
+                Span::from(" target").fg(blue),
             ]),
         ];
 

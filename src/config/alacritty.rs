@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::error::{AppError, Result};
+use crate::error::{AlthemerError, Result};
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -18,26 +18,22 @@ pub struct GeneralConfig {
     pub import: Vec<String>,
 }
 
-/// Returns the Alacritty config directory (~/.config/alacritty).
 pub fn get_alacritty_config_dir() -> Result<PathBuf> {
     dirs::config_dir()
         .map(|p| p.join("alacritty"))
-        .ok_or_else(|| AppError::ConfigNotFound(PathBuf::from("~/.config/alacritty")))
+        .ok_or_else(|| AlthemerError::ConfigNotFound(PathBuf::from("~/.config/alacritty")))
 }
 
-/// Returns the path to alacritty.toml config file.
 pub fn get_alacritty_config_path() -> Result<PathBuf> {
     Ok(get_alacritty_config_dir()?.join("alacritty.toml"))
 }
 
-/// Reads and parses an Alacritty config file.
 pub fn read_config(path: &Path) -> Result<AlacrittyConfig> {
     let content = std::fs::read_to_string(path)?;
     let config = toml::from_str::<AlacrittyConfig>(&content)?;
     Ok(config)
 }
 
-/// Writes an Alacritty config file.
 pub fn write_config(path: &Path, config: &AlacrittyConfig) -> Result<()> {
     let content = toml::to_string_pretty(config)?;
     std::fs::write(path, content)?;

@@ -1,19 +1,33 @@
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
-use crate::error::{AppError, Result};
+use crate::error::{AlthemerError, Result};
 use dirs::home_dir;
 
 #[derive(Debug, Clone, Deserialize, Serialize, Default, PartialEq)]
 pub struct AlthemerConfig {
     #[serde(default)]
     pub themes_dir: Option<PathBuf>,
+
+    #[serde(default = "default_show_preview")]
+    pub show_preview: bool,
+
+    #[serde(default = "default_quit_on_select")]
+    pub quit_on_select: bool,
+}
+
+fn default_show_preview() -> bool {
+    true
+}
+
+fn default_quit_on_select() -> bool {
+    false
 }
 
 pub fn get_althemer_config_dir() -> Result<PathBuf> {
     home_dir()
         .map(|p| p.join(".config").join("althemer"))
-        .ok_or_else(|| AppError::ConfigNotFound(PathBuf::from("~/.config/althemer")))
+        .ok_or_else(|| AlthemerError::ConfigNotFound(PathBuf::from("~/.config/althemer")))
 }
 
 pub fn get_config_path() -> Result<PathBuf> {
@@ -32,17 +46,17 @@ pub fn get_themes_dir(custom_path: Option<&Path>) -> Result<PathBuf> {
         }
 
         if !themes_dir.exists() {
-            return Err(AppError::ThemesDirNotFound(themes_dir));
+            return Err(AlthemerError::ThemesDirNotFound(themes_dir));
         }
 
         return Ok(themes_dir);
     }
 
     let alacritty_dir = alacritty_config_dir()
-        .ok_or_else(|| AppError::ConfigNotFound(PathBuf::from("~/.config/alacritty")))?;
+        .ok_or_else(|| AlthemerError::ConfigNotFound(PathBuf::from("~/.config/alacritty")))?;
     let themes_dir = alacritty_dir.join("themes").join("themes");
     if !themes_dir.exists() {
-        return Err(AppError::ThemesDirNotFound(themes_dir));
+        return Err(AlthemerError::ThemesDirNotFound(themes_dir));
     }
 
     Ok(themes_dir)
@@ -60,6 +74,7 @@ impl AlthemerConfig {
         };
 
         if !config_path.exists() {
+            // TODO: notify the user we didn't load the config from the path cuz it doesn't exist
             return Ok(AlthemerConfig::default());
         }
 
@@ -94,7 +109,8 @@ mod tests {
 
         let json = r#"{
             "themes_dir": "/custom/themes",
-            "show_preview": false
+            "show_preview": false,
+            "quit_on_select": true
         }"#;
         fs::write(&config_path, json).expect("Failed to write config");
 
@@ -118,6 +134,7 @@ mod tests {
 
         let config = AlthemerConfig {
             themes_dir: Some(PathBuf::from("/test/themes")),
+            ..Default::default()
         };
 
         let content = serde_json::to_string_pretty(&config).expect("Should serialize");

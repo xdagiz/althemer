@@ -2,8 +2,8 @@ use ratatui::style::Color;
 use serde::Deserialize;
 
 use crate::config::alacritty::{get_alacritty_config_path, read_config};
-use crate::config::config::get_themes_dir;
-use crate::error::{AppError, Result};
+use crate::config::configuration::get_themes_dir;
+use crate::error::{AlthemerError, Result};
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone)]
@@ -16,28 +16,43 @@ pub struct Theme {
 pub struct ThemeColors {
     #[serde(default)]
     pub colors: ColorScheme,
+    #[serde(skip)]
+    cached: Option<CachedColors>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct ColorScheme {
-    #[serde(default)]
-    pub primary: PrimaryColors,
-    #[serde(default)]
-    pub cursor: CursorColors,
+    #[serde(default, rename = "primary")]
+    pub primary_hex: PrimaryColorsHex,
+    #[serde(default, rename = "cursor")]
+    pub cursor_hex: CursorColorsHex,
     #[serde(default)]
     pub normal: NormalColors,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
-pub struct PrimaryColors {
+#[serde(rename_all = "kebab-case")]
+pub struct PrimaryColorsHex {
     #[serde(default)]
-    pub background: String,
+    pub background: Option<String>,
     #[serde(default)]
-    pub foreground: String,
+    pub foreground: Option<String>,
+}
+
+#[derive(Debug, Clone, Default)]
+struct CachedColors {
+    background: Option<Color>,
+    foreground: Option<Color>,
+    green: Option<Color>,
+    yellow: Option<Color>,
+    blue: Option<Color>,
+    magenta: Option<Color>,
+    cyan: Option<Color>,
+    cursor_text: Option<Color>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
-pub struct CursorColors {
+pub struct CursorColorsHex {
     #[serde(default)]
     pub text: String,
 }
@@ -59,60 +74,108 @@ pub struct NormalColors {
 impl ThemeColors {
     pub fn from_path(path: &Path) -> Result<Self> {
         let content = std::fs::read_to_string(path)?;
-        let colors: ThemeColors = toml::from_str(&content)
-            .map_err(|e| AppError::PreviewError(format!("Failed to parse theme: {}", e)))?;
+        let mut colors: ThemeColors = toml::from_str(&content)
+            .map_err(|e| AlthemerError::PreviewError(format!("Failed to parse theme: {}", e)))?;
+
+        let cs = &colors.colors;
+        colors.cached = Some(CachedColors {
+            background: cs
+                .primary_hex
+                .background
+                .as_ref()
+                .map(|h| Self::hex_to_ratatui(h)),
+            foreground: cs
+                .primary_hex
+                .foreground
+                .as_ref()
+                .map(|h| Self::hex_to_ratatui(h)),
+            green: Self::hex_to_ratatui_opt(&cs.normal.green),
+            yellow: Self::hex_to_ratatui_opt(&cs.normal.yellow),
+            blue: Self::hex_to_ratatui_opt(&cs.normal.blue),
+            magenta: Self::hex_to_ratatui_opt(&cs.normal.magenta),
+            cyan: Self::hex_to_ratatui_opt(&cs.normal.cyan),
+            cursor_text: Self::hex_to_ratatui_opt(&cs.cursor_hex.text),
+        });
 
         Ok(colors)
     }
 
-    fn hex_to_rgb(hex: &str) -> (u8, u8, u8) {
-        let hex = hex.trim_start_matches('#');
-        if hex.len() < 6 {
-            return (0, 0, 0);
+    fn hex_to_ratatui_opt(hex: &str) -> Option<Color> {
+        let hex = hex.trim();
+        if hex.is_empty() {
+            return None;
         }
 
-        let r = u8::from_str_radix(&hex[0..2], 16).unwrap_or(0);
-        let g = u8::from_str_radix(&hex[2..4], 16).unwrap_or(0);
-        let b = u8::from_str_radix(&hex[4..6], 16).unwrap_or(0);
+        let hex = hex.trim_start_matches('#');
+        if hex.len() < 6 {
+            return None;
+        }
 
-        (r, g, b)
+        let r = u8::from_str_radix(&hex[0..2], 16).ok()?;
+        let g = u8::from_str_radix(&hex[2..4], 16).ok()?;
+        let b = u8::from_str_radix(&hex[4..6], 16).ok()?;
+
+        Some(Color::Rgb(r, g, b))
     }
 
-    pub fn hex_to_ratatui(hex: &str) -> Color {
-        let (r, g, b) = Self::hex_to_rgb(hex);
-        Color::Rgb(r, g, b)
+    fn hex_to_ratatui(hex: &str) -> Color {
+        Self::hex_to_ratatui_opt(hex).unwrap_or(Color::Reset)
     }
 
     pub fn background(&self) -> Color {
-        Self::hex_to_ratatui(&self.colors.primary.background)
+        self.cached
+            .as_ref()
+            .and_then(|c| c.background)
+            .unwrap_or(Color::Reset)
     }
 
     pub fn foreground(&self) -> Color {
-        Self::hex_to_ratatui(&self.colors.primary.foreground)
+        self.cached
+            .as_ref()
+            .and_then(|c| c.foreground)
+            .unwrap_or(Color::Reset)
     }
 
     pub fn green(&self) -> Color {
-        Self::hex_to_ratatui(&self.colors.normal.green)
+        self.cached
+            .as_ref()
+            .and_then(|c| c.green)
+            .unwrap_or(Color::Reset)
     }
 
     pub fn yellow(&self) -> Color {
-        Self::hex_to_ratatui(&self.colors.normal.yellow)
+        self.cached
+            .as_ref()
+            .and_then(|c| c.yellow)
+            .unwrap_or(Color::Reset)
     }
 
     pub fn blue(&self) -> Color {
-        Self::hex_to_ratatui(&self.colors.normal.blue)
+        self.cached
+            .as_ref()
+            .and_then(|c| c.blue)
+            .unwrap_or(Color::Reset)
     }
 
     pub fn magenta(&self) -> Color {
-        Self::hex_to_ratatui(&self.colors.normal.magenta)
+        self.cached
+            .as_ref()
+            .and_then(|c| c.magenta)
+            .unwrap_or(Color::Reset)
     }
 
     pub fn cyan(&self) -> Color {
-        Self::hex_to_ratatui(&self.colors.normal.cyan)
+        self.cached
+            .as_ref()
+            .and_then(|c| c.cyan)
+            .unwrap_or(Color::Reset)
     }
 
     pub fn cursor_text(&self) -> Color {
-        Self::hex_to_ratatui(&self.colors.cursor.text)
+        self.cached
+            .as_ref()
+            .and_then(|c| c.cursor_text)
+            .unwrap_or(Color::Reset)
     }
 }
 
@@ -131,7 +194,7 @@ impl Theme {
 pub fn list_themes(custom_path: Option<&Path>) -> Result<Vec<Theme>> {
     let themes_dir = get_themes_dir(custom_path)?;
 
-    let mut themes: Vec<Theme> = std::fs::read_dir(themes_dir)?
+    let mut themes: Vec<Theme> = std::fs::read_dir(&themes_dir)?
         .filter_map(|entry| entry.ok())
         .filter(|entry| {
             entry
@@ -140,7 +203,22 @@ pub fn list_themes(custom_path: Option<&Path>) -> Result<Vec<Theme>> {
                 .map(|ext| ext == "toml")
                 .unwrap_or(false)
         })
-        .filter_map(|entry| Theme::from_path(&entry.path()))
+        .filter_map(|entry| {
+            let path = entry.path();
+            if let Ok(canonical) = path.canonicalize() {
+                if let Ok(themes_canonical) = themes_dir.canonicalize() {
+                    if canonical.starts_with(&themes_canonical) {
+                        Theme::from_path(&path)
+                    } else {
+                        None
+                    }
+                } else {
+                    Theme::from_path(&path)
+                }
+            } else {
+                Theme::from_path(&path)
+            }
+        })
         .collect();
 
     themes.sort_by(|a, b| a.name.cmp(&b.name));
@@ -153,7 +231,7 @@ pub fn get_current_theme(custom_path: Option<&Path>) -> Result<Option<Theme>> {
     let config_path = get_alacritty_config_path()?;
 
     if !config_path.exists() {
-        return Err(AppError::ConfigNotFound(config_path));
+        return Err(AlthemerError::ConfigNotFound(config_path));
     }
 
     let config = read_config(&config_path)?;
@@ -183,7 +261,7 @@ pub fn get_current_theme(custom_path: Option<&Path>) -> Result<Option<Theme>> {
 pub fn get_theme_by_name(name: &str, custom_path: Option<&Path>) -> Result<Theme> {
     let name = name.trim();
     if name.is_empty() {
-        return Err(AppError::ThemeNotFound(name.to_string()));
+        return Err(AlthemerError::ThemeNotFound(name.to_string()));
     }
 
     let themes = list_themes(custom_path)?;
@@ -192,7 +270,7 @@ pub fn get_theme_by_name(name: &str, custom_path: Option<&Path>) -> Result<Theme
     themes
         .into_iter()
         .find(|t| t.name == name || t.name.eq_ignore_ascii_case(name))
-        .ok_or_else(|| AppError::ThemeNotFound(name.to_string()))
+        .ok_or_else(|| AlthemerError::ThemeNotFound(name.to_string()))
 }
 
 #[cfg(test)]
@@ -204,7 +282,7 @@ mod tests {
     fn create_temp_dir(files: &[&str]) -> TempDir {
         let dir = tempfile::tempdir().expect("Failed to create temp dir");
         for file in files {
-            let path = dir.path().join(format!("{}.toml", file));
+            let path = dir.path().join(file).with_extension("toml");
             fs::write(&path, "").expect("Failed to write temp file");
         }
         dir
