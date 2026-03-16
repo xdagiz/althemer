@@ -1,7 +1,6 @@
 use serde::{Deserialize, Serialize};
 
 use crate::error::{AppError, Result};
-use dirs::config_dir;
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -21,7 +20,7 @@ pub struct GeneralConfig {
 
 /// Returns the Alacritty config directory (~/.config/alacritty).
 pub fn get_alacritty_config_dir() -> Result<PathBuf> {
-    config_dir()
+    dirs::config_dir()
         .map(|p| p.join("alacritty"))
         .ok_or_else(|| AppError::ConfigNotFound(PathBuf::from("~/.config/alacritty")))
 }
@@ -29,26 +28,6 @@ pub fn get_alacritty_config_dir() -> Result<PathBuf> {
 /// Returns the path to alacritty.toml config file.
 pub fn get_alacritty_config_path() -> Result<PathBuf> {
     Ok(get_alacritty_config_dir()?.join("alacritty.toml"))
-}
-
-/// Returns the themes directory, either from custom path or default location.
-pub fn get_themes_dir(custom_path: Option<&Path>) -> Result<PathBuf> {
-    if let Some(path) = custom_path {
-        let themes_dir = path.to_path_buf();
-        if !themes_dir.exists() {
-            return Err(AppError::ThemesDirNotFound(themes_dir));
-        }
-
-        return Ok(themes_dir);
-    }
-
-    let themes_dir = get_alacritty_config_dir()?.join("themes").join("themes");
-
-    if !themes_dir.exists() {
-        return Err(AppError::ThemesDirNotFound(themes_dir));
-    }
-
-    Ok(themes_dir)
 }
 
 /// Reads and parses an Alacritty config file.
@@ -63,29 +42,4 @@ pub fn write_config(path: &Path, config: &AlacrittyConfig) -> Result<()> {
     let content = toml::to_string_pretty(config)?;
     std::fs::write(path, content)?;
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn get_themes_dir_custom_path_exists() {
-        let dir = tempfile::tempdir().unwrap();
-
-        let result = get_themes_dir(Some(dir.path()));
-
-        assert!(result.is_ok());
-        assert_eq!(result.unwrap(), dir.path());
-    }
-
-    #[test]
-    fn get_themes_dir_custom_path_not_exists() {
-        let dir = tempfile::tempdir().unwrap();
-        let non_existent = dir.path().join("nonexistent");
-
-        let result = get_themes_dir(Some(&non_existent));
-
-        assert!(result.is_err());
-    }
 }

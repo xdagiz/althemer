@@ -21,6 +21,9 @@ pub enum AppError {
     #[error("Failed to serialize TOML: {0}")]
     TomlSerialize(#[from] toml::ser::Error),
 
+    #[error("Failed to parse JSON: {0}")]
+    JsonParse(#[from] serde_json::Error),
+
     #[error("Interactive search failed: {0}")]
     InteractiveError(String),
 

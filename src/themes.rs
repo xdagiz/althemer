@@ -1,7 +1,8 @@
 use ratatui::style::Color;
 use serde::Deserialize;
 
-use crate::config::{get_alacritty_config_path, get_themes_dir, read_config};
+use crate::config::alacritty::{get_alacritty_config_path, read_config};
+use crate::config::config::get_themes_dir;
 use crate::error::{AppError, Result};
 use std::path::{Path, PathBuf};
 
