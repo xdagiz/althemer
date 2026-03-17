@@ -1,13 +1,14 @@
 use crate::config::AlthemerConfig;
 use crate::switcher::switch_theme;
-use crate::themes::{Theme, ThemeColors, list_themes};
+use crate::themes::{Theme, ThemeCategory, ThemeColors, list_themes};
 use crossterm::{
     cursor::SetCursorStyle,
     event::{self, KeyCode, KeyEvent, KeyEventKind, KeyModifiers},
     execute,
 };
 use ratatui::layout::Position;
-use ratatui::widgets::Padding;
+use ratatui::symbols;
+use ratatui::widgets::{Padding, Tabs};
 use ratatui::{
     DefaultTerminal,
     buffer::Buffer,
@@ -39,6 +40,7 @@ pub struct App {
     character_index: usize,
     show_preview: bool,
     quit_on_select: bool,
+    selected_tab: usize,
 }
 
 struct ThemesList {
@@ -68,7 +70,12 @@ impl App {
             Err(err) => (Vec::new(), Some(format!("Failed to load themes: {err}"))),
         };
 
-        let filtered_indices = (0..items.len()).collect();
+        let filtered_indices = items
+            .iter()
+            .enumerate()
+            .filter(|(_, t)| t.category == ThemeCategory::default())
+            .map(|(i, _)| i)
+            .collect();
         Self {
             should_exit: false,
             themes: ThemesList {
@@ -85,6 +92,7 @@ impl App {
             character_index: 0,
             show_preview: config.show_preview,
             quit_on_select: config.quit_on_select,
+            selected_tab: 0,
         }
     }
 
@@ -122,9 +130,9 @@ impl App {
                 KeyCode::Char('n') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                     self.select_next(area)
                 }
-                KeyCode::Char('k') | KeyCode::Up => self.select_previous(),
+                KeyCode::Char('k') | KeyCode::Up => self.select_previous(area),
                 KeyCode::Char('p') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                    self.select_previous()
+                    self.select_previous(area)
                 }
                 KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                     self.should_exit = true
@@ -152,6 +160,16 @@ impl App {
                         self.reset_cursor();
                         self.apply_filter(area);
                     }
+                }
+                KeyCode::Tab | KeyCode::Right | KeyCode::Char('l') => {
+                    self.selected_tab = (self.selected_tab + 1) % 2;
+                    self.apply_filter(area);
+                }
+                KeyCode::Left | KeyCode::BackTab | KeyCode::Char('h') => {
+                    if self.selected_tab > 0 {
+                        self.selected_tab = (self.selected_tab - 1) % 2
+                    }
+                    self.apply_filter(area);
                 }
                 KeyCode::Enter => self.confirm_selection(),
                 _ => {}
@@ -266,21 +284,23 @@ impl App {
         } else {
             String::new()
         };
-
+        let category = match self.selected_tab {
+            0 => ThemeCategory::Dark,
+            _ => ThemeCategory::Light,
+        };
         let old_selected = self.themes.selected;
 
-        if lower_filter.is_empty() {
-            self.themes.filtered_indices = (0..self.themes.items.len()).collect();
-        } else {
-            self.themes.filtered_indices = self
-                .themes
-                .items
-                .iter()
-                .enumerate()
-                .filter(|(_, theme)| theme.name.to_lowercase().contains(&lower_filter))
-                .map(|(i, _)| i)
-                .collect();
-        }
+        self.themes.filtered_indices = self
+            .themes
+            .items
+            .iter()
+            .enumerate()
+            .filter(|(_, theme)| {
+                lower_filter.is_empty() || theme.name_lower.contains(&lower_filter)
+            })
+            .filter(|(_, theme)| theme.category == category)
+            .map(|(i, _)| i)
+            .collect();
 
         if !self.themes.filtered_indices.contains(&old_selected) {
             self.themes.selected = *self.themes.filtered_indices.first().unwrap_or(&0);
@@ -299,7 +319,7 @@ impl App {
     }
 
     fn visible_count(&self, area: Rect) -> usize {
-        area.height.saturating_sub(3) as usize // footer (1) + top/bottom borders (2)
+        area.height.saturating_sub(5) as usize // footer (1) + top/bottom borders (2) + tabs height + padding (2)
     }
 
     fn adjust_scroll(&mut self, area: Rect) {
@@ -325,14 +345,12 @@ impl App {
         }
     }
 
-    fn select_previous(&mut self) {
+    fn select_previous(&mut self, area: Rect) {
         let pos = self.filtered_pos();
         if pos > 0 {
             self.themes.selected = self.themes.filtered_indices[pos - 1];
             self.update_cached_colors();
-            if pos - 1 < self.themes.scroll {
-                self.themes.scroll = pos - 1;
-            }
+            self.adjust_scroll(area);
         }
     }
 
@@ -419,12 +437,17 @@ impl App {
 
 impl Widget for &mut App {
     fn render(self, area: Rect, buf: &mut Buffer) {
-        let main_layout = Layout::vertical([Constraint::Fill(1), Constraint::Length(1)]);
-        let [content_area, footer_area] = area.layout(&main_layout);
+        let main_layout = Layout::vertical([
+            Constraint::Length(2),
+            Constraint::Fill(1),
+            Constraint::Length(1),
+        ]);
+        let [tabs_area, content_area, footer_area] = area.layout(&main_layout);
 
         let content_layout = Layout::horizontal([Constraint::Percentage(30), Constraint::Fill(1)]);
         let [list_area, item_area] = content_area.layout(&content_layout);
 
+        self.render_tabs(tabs_area, buf);
         self.render_footer(footer_area, buf);
         self.render_list(list_area, buf);
         if self.show_preview {
@@ -434,6 +457,24 @@ impl Widget for &mut App {
 }
 
 impl App {
+    pub fn render_tabs(&mut self, area: Rect, buf: &mut Buffer) {
+        let block = Block::default().padding(Padding::top(1));
+        let dark = ThemeCategory::Dark;
+        let light = ThemeCategory::Light;
+
+        Tabs::new(vec![
+            format!(" {} {} ", dark.icon(), dark.label()),
+            format!(" {} {} ", light.icon(), light.label()),
+        ])
+        .style(Color::White)
+        .highlight_style(Style::default().magenta().on_black().bold())
+        .select(self.selected_tab)
+        .divider(symbols::DOT)
+        .block(block)
+        .padding(" ", " ")
+        .render(area, buf);
+    }
+
     fn render_footer(&mut self, area: Rect, buf: &mut Buffer) {
         match self.input_mode {
             InputMode::Normal => {
@@ -483,12 +524,19 @@ impl App {
         let start = self.themes.scroll;
         let end = (start + vis).min(self.themes.filtered_indices.len());
 
-        let visible_items: Vec<ListItem> = self.themes.filtered_indices[start..end]
+        let items: Vec<ListItem> = self.themes.filtered_indices[start..end]
             .iter()
-            .map(|&idx| ListItem::new(self.themes.items[idx].name.as_str()))
+            .map(|&idx| {
+                let theme = &self.themes.items[idx];
+                ListItem::from(Line::from(format!(
+                    "{} {}",
+                    theme.category.icon(),
+                    theme.name
+                )))
+            })
             .collect();
 
-        let list = List::new(visible_items)
+        let list = List::new(items)
             .block(block)
             .highlight_style(SELECTED_STYLE)
             .highlight_symbol("❯ ")
@@ -527,14 +575,16 @@ impl App {
             area.width / 6,
         ));
 
-        let prompt_line = Line::from(vec![
+        let prompt_line = || {
+            Line::from(vec![
                 Span::from("󰣇 ").fg(fg),
                 Span::from("~/althemer ").fg(blue),
-                Span::from(" main ").fg(green),
-                Span::from(" v1.92.0 ").fg(cyan),
-        ]);
+                Span::from(" main ").fg(green),
+                Span::from(" v1.92.0 ").fg(cyan),
+            ])
+        };
         let text = vec![
-            prompt_line.clone(),
+            prompt_line(),
             Line::from(vec![
                 Span::from("❯ ").fg(magenta),
                 Span::from("echo ").fg(fg),
@@ -542,7 +592,7 @@ impl App {
                 Span::from("█").fg(colors.cursor_text()),
             ]),
             Line::from("\n"),
-            prompt_line.clone(),
+            prompt_line(),
             Line::from(vec![Span::from("❯ ").fg(magenta), Span::from("ls ").fg(fg)]),
             Line::from(vec![
                 Span::from(" Cargo.lock  ").fg(fg),

@@ -9,7 +9,57 @@ use std::path::{Path, PathBuf};
 #[derive(Debug, Clone)]
 pub struct Theme {
     pub name: String,
+    pub name_lower: String,
     pub path: PathBuf,
+    pub category: ThemeCategory,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ThemeCategory {
+    #[default]
+    Dark,
+    Light,
+}
+
+impl ThemeCategory {
+    pub fn label(&self) -> &'static str {
+        match self {
+            ThemeCategory::Dark => "Dark",
+            ThemeCategory::Light => "Light",
+        }
+    }
+
+    pub fn icon(&self) -> &'static str {
+        match self {
+            ThemeCategory::Dark => "⏾",
+            ThemeCategory::Light => "☀",
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct ThemeGroups {
+    pub dark: Vec<Theme>,
+    pub light: Vec<Theme>,
+}
+
+impl ThemeGroups {
+    pub fn from_themes(mut themes: Vec<Theme>) -> Self {
+        for theme in &mut themes {
+            theme.categorize().ok();
+        }
+
+        let mut dark = Vec::new();
+        let mut light = Vec::new();
+        for theme in themes {
+            match theme.category {
+                ThemeCategory::Dark => dark.push(theme),
+                ThemeCategory::Light => light.push(theme),
+            }
+        }
+
+        Self { dark, light }
+    }
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -183,16 +233,55 @@ impl Theme {
     /// Creates a Theme from a file path.
     pub fn from_path(path: &Path) -> Option<Self> {
         let name = path.file_stem()?.to_str()?.to_string();
+        let name_lower = name.to_lowercase();
         Some(Theme {
             name,
+            name_lower,
             path: path.to_path_buf(),
+            category: ThemeCategory::default(),
         })
+    }
+
+    pub fn categorize(&mut self) -> Result<()> {
+        if let Some(category) = self.categorize_from_filename() {
+            self.category = category;
+            return Ok(());
+        }
+        Ok(())
+    }
+
+    fn categorize_from_filename(&self) -> Option<ThemeCategory> {
+        let name_lower = &self.name_lower;
+
+        if name_lower.ends_with("_dark") || name_lower.ends_with("-dark") {
+            return None;
+        }
+
+        const LIGHT_KEYWORDS: &[&str] = &[
+            "_light",
+            "-light",
+            "acme",
+            "alabaster",
+            "latte",
+            "dayfox",
+            "morningfox",
+            "noctis_lux",
+            "papertheme",
+            "dawn",
+        ];
+
+        if LIGHT_KEYWORDS.iter().any(|&kw| name_lower.contains(kw)) {
+            return Some(ThemeCategory::Light);
+        }
+
+        None
     }
 }
 
 /// Lists all available themes from the themes directory.
 pub fn list_themes(custom_path: Option<&Path>) -> Result<Vec<Theme>> {
     let themes_dir = get_themes_dir(custom_path)?;
+    let themes_dir_canonical = themes_dir.canonicalize().ok();
 
     let mut themes: Vec<Theme> = std::fs::read_dir(&themes_dir)?
         .filter_map(|entry| entry.ok())
@@ -205,23 +294,16 @@ pub fn list_themes(custom_path: Option<&Path>) -> Result<Vec<Theme>> {
         })
         .filter_map(|entry| {
             let path = entry.path();
-            if let Ok(canonical) = path.canonicalize() {
-                if let Ok(themes_canonical) = themes_dir.canonicalize() {
-                    if canonical.starts_with(&themes_canonical) {
-                        Theme::from_path(&path)
-                    } else {
-                        None
-                    }
-                } else {
-                    Theme::from_path(&path)
-                }
-            } else {
-                Theme::from_path(&path)
+            match (&themes_dir_canonical, path.canonicalize().ok()) {
+                (Some(dir), Some(canonical)) if !canonical.starts_with(dir) => None,
+                _ => Theme::from_path(&path),
             }
         })
         .collect();
 
     themes.sort_by(|a, b| a.name.cmp(&b.name));
+    let groups = ThemeGroups::from_themes(themes);
+    let themes: Vec<Theme> = groups.dark.into_iter().chain(groups.light).collect();
 
     Ok(themes)
 }
@@ -253,7 +335,13 @@ pub fn get_current_theme(custom_path: Option<&Path>) -> Result<Option<Theme>> {
             .and_then(|s| s.to_str())
             .unwrap_or("unknown")
             .to_string(),
+        name_lower: theme_path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("unknown")
+            .to_lowercase(),
         path: theme_path,
+        category: ThemeCategory::Dark,
     }))
 }
 
