@@ -1,4 +1,5 @@
 use ratatui::style::Color;
+use relative_luminance::{Luminance, Rgb};
 use serde::Deserialize;
 
 use crate::config::alacritty::{get_alacritty_config_path, read_config};
@@ -247,6 +248,13 @@ impl Theme {
             self.category = category;
             return Ok(());
         }
+
+        if let Some(lum) = self.read_luminance()?
+            && lum > 0.5
+        {
+            self.category = ThemeCategory::Light;
+        }
+
         Ok(())
     }
 
@@ -254,27 +262,34 @@ impl Theme {
         let name_lower = &self.name_lower;
 
         if name_lower.ends_with("_dark") || name_lower.ends_with("-dark") {
-            return None;
+            return Some(ThemeCategory::Dark);
         }
 
-        const LIGHT_KEYWORDS: &[&str] = &[
-            "_light",
-            "-light",
-            "acme",
-            "alabaster",
-            "latte",
-            "dayfox",
-            "morningfox",
-            "noctis_lux",
-            "papertheme",
-            "dawn",
-        ];
-
-        if LIGHT_KEYWORDS.iter().any(|&kw| name_lower.contains(kw)) {
+        if name_lower.ends_with("_light") || name_lower.ends_with("-light") {
             return Some(ThemeCategory::Light);
         }
 
         None
+    }
+
+    fn read_background_color(&self) -> Result<Option<String>> {
+        let content = std::fs::read_to_string(&self.path)?;
+        let parsed: toml::Value = toml::from_str(&content)?;
+        Ok(parsed
+            .get("colors")
+            .and_then(|c| c.get("primary"))
+            .and_then(|p| p.get("background"))
+            .and_then(|v| v.as_str())
+            .map(String::from))
+    }
+
+    fn read_luminance(&self) -> Result<Option<f64>> {
+        let bg = match self.read_background_color()? {
+            Some(hex) => hex,
+            None => return Ok(None),
+        };
+
+        Ok(parse_hex_color(&bg).map(|rgb| rgb.relative_luminance()))
     }
 }
 
@@ -359,6 +374,24 @@ pub fn get_theme_by_name(name: &str, custom_path: Option<&Path>) -> Result<Theme
         .into_iter()
         .find(|t| t.name == name || t.name.eq_ignore_ascii_case(name))
         .ok_or_else(|| AlthemerError::ThemeNotFound(name.to_string()))
+}
+
+fn parse_hex_color(hex: &str) -> Option<Rgb<f64>> {
+    let hex = hex.strip_prefix('#').unwrap_or(hex);
+
+    if hex.len() != 6 {
+        return None;
+    }
+
+    let r = u8::from_str_radix(&hex[0..2], 16).ok()?;
+    let g = u8::from_str_radix(&hex[2..4], 16).ok()?;
+    let b = u8::from_str_radix(&hex[4..6], 16).ok()?;
+
+    Some(Rgb {
+        r: f64::from(r) / 255.0,
+        g: f64::from(g) / 255.0,
+        b: f64::from(b) / 255.0,
+    })
 }
 
 #[cfg(test)]
@@ -451,5 +484,127 @@ mod tests {
         assert!(result.is_err());
         let err = result.unwrap_err();
         assert!(err.to_string().contains("nonexistent"));
+    }
+
+    #[test]
+    fn parse_hex_color_valid() {
+        let rgb = parse_hex_color("#282a36").unwrap();
+        // 0x28 = 40, 40/255 ≈ 0.157
+        assert!((rgb.r - 0.157).abs() < 0.01);
+        // 0x2a = 42, 42/255 ≈ 0.165
+        assert!((rgb.g - 0.165).abs() < 0.01);
+        // 0x36 = 54, 54/255 ≈ 0.212
+        assert!((rgb.b - 0.212).abs() < 0.01);
+    }
+
+    #[test]
+    fn parse_hex_color_invalid_chars() {
+        assert!(parse_hex_color("#xyz123").is_none());
+    }
+
+    #[test]
+    fn parse_hex_color_no_hash() {
+        assert!(parse_hex_color("282a36").is_some());
+    }
+
+    #[test]
+    fn parse_hex_color_black() {
+        let rgb = parse_hex_color("#000000").unwrap();
+        assert!(rgb.r < 0.001);
+        assert!(rgb.g < 0.001);
+        assert!(rgb.b < 0.001);
+    }
+
+    #[test]
+    fn parse_hex_color_white() {
+        let rgb = parse_hex_color("#ffffff").unwrap();
+        assert!(rgb.r > 0.999);
+        assert!(rgb.g > 0.999);
+        assert!(rgb.b > 0.999);
+    }
+
+    fn create_theme_file(dir: &TempDir, name: &str, toml_content: &str) -> Theme {
+        let path = dir.path().join(format!("{name}.toml"));
+        fs::write(&path, toml_content).expect("Failed to write theme file");
+        Theme::from_path(&path).unwrap()
+    }
+
+    #[test]
+    fn light_background_categorizes_as_light() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut theme = create_theme_file(
+            &dir,
+            "test_light",
+            r##"
+[colors.primary]
+background = "#fbf1c7"
+foreground = "#3c3836"
+"##,
+        );
+        theme.categorize().unwrap();
+        assert_eq!(theme.category, ThemeCategory::Light);
+    }
+
+    #[test]
+    fn dark_background_categorizes_as_dark() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut theme = create_theme_file(
+            &dir,
+            "test_dark",
+            r##"
+[colors.primary]
+background = "#282a36"
+foreground = "#f8f8f2"
+"##,
+        );
+        theme.categorize().unwrap();
+        assert_eq!(theme.category, ThemeCategory::Dark);
+    }
+
+    #[test]
+    fn filename_suffix_overrides_luminance() {
+        let dir = tempfile::tempdir().unwrap();
+        // bright background but _dark suffix — filename wins
+        let mut theme = create_theme_file(
+            &dir,
+            "custom_dark",
+            r##"
+[colors.primary]
+background = "#fbf1c7"
+foreground = "#3c3836"
+"##,
+        );
+        theme.categorize().unwrap();
+        assert_eq!(theme.category, ThemeCategory::Dark);
+    }
+
+    #[test]
+    fn no_colors_section_stays_default_dark() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut theme = create_theme_file(
+            &dir,
+            "broken",
+            r##"
+some_other_field = "value"
+"##,
+        );
+        theme.categorize().unwrap();
+        assert_eq!(theme.category, ThemeCategory::Dark);
+    }
+
+    #[test]
+    fn light_suffix_categorizes_as_light() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut theme = create_theme_file(&dir, "gruvbox_light", r#""#);
+        theme.categorize().unwrap();
+        assert_eq!(theme.category, ThemeCategory::Light);
+    }
+
+    #[test]
+    fn dark_suffix_stays_dark() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut theme = create_theme_file(&dir, "gruvbox_dark", r#""#);
+        theme.categorize().unwrap();
+        assert_eq!(theme.category, ThemeCategory::Dark);
     }
 }

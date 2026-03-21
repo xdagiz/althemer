@@ -19,7 +19,7 @@ checksum = "683d7910e743518b0e34f1186f92494becacb047c7b6bf616c96772180fef923"
 
 [[package]]
 name = "althemer"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "clap",
  "crossterm",
@@ -28,6 +28,7 @@ dependencies = [
  "nucleo",
  "nucleo-picker",
  "ratatui",
+ "relative-luminance",
  "serde",
  "serde_json",
  "shellexpand",
@@ -1334,6 +1335,12 @@ name = "regex-syntax"
 version = "0.8.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dc897dd8d9e8bd1ed8cdad82b5966c3e0ecae09fb1907d58efaa013543185d0a"
+
+[[package]]
+name = "relative-luminance"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "80010a7606585ed19af01ebd8ffed344b1bf9cdcfef6eb10100ab07421324f05"
 
 [[package]]
 name = "rustc_version"

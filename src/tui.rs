@@ -1,6 +1,6 @@
 use crate::config::AlthemerConfig;
 use crate::switcher::switch_theme;
-use crate::themes::{Theme, ThemeCategory, ThemeColors, list_themes};
+use crate::themes::{Theme, ThemeCategory, ThemeColors, get_current_theme, list_themes};
 use crossterm::{
     cursor::SetCursorStyle,
     event::{self, KeyCode, KeyEvent, KeyEventKind, KeyModifiers},
@@ -41,6 +41,7 @@ pub struct App {
     show_preview: bool,
     quit_on_select: bool,
     selected_tab: usize,
+    current_theme: Option<Theme>,
 }
 
 struct ThemesList {
@@ -69,7 +70,10 @@ impl App {
             Ok(items) => (items, None),
             Err(err) => (Vec::new(), Some(format!("Failed to load themes: {err}"))),
         };
-
+        let current = match get_current_theme(custom_themes_path) {
+            Ok(t) => t,
+            Err(_) => None,
+        };
         let filtered_indices = items
             .iter()
             .enumerate()
@@ -93,6 +97,7 @@ impl App {
             show_preview: config.show_preview,
             quit_on_select: config.quit_on_select,
             selected_tab: 0,
+            current_theme: current,
         }
     }
 
@@ -528,6 +533,17 @@ impl App {
             .iter()
             .map(|&idx| {
                 let theme = &self.themes.items[idx];
+                if self
+                    .current_theme
+                    .as_ref()
+                    .is_some_and(|c| c.name == theme.name)
+                {
+                    return ListItem::from(Line::from(format!(
+                        "{} {} (current)",
+                        theme.category.icon(),
+                        theme.name
+                    )));
+                }
                 ListItem::from(Line::from(format!(
                     "{} {}",
                     theme.category.icon(),
