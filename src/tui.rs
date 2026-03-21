@@ -1,6 +1,8 @@
 use crate::config::AlthemerConfig;
 use crate::switcher::switch_theme;
-use crate::themes::{Theme, ThemeCategory, ThemeColors, get_current_theme, list_themes};
+use crate::themes::{
+    Theme, ThemeCategory, ThemeColors, get_current_theme_import_path, list_themes,
+};
 use crossterm::{
     cursor::SetCursorStyle,
     event::{self, KeyCode, KeyEvent, KeyEventKind, KeyModifiers},
@@ -41,7 +43,9 @@ pub struct App {
     show_preview: bool,
     quit_on_select: bool,
     selected_tab: usize,
-    current_theme: Option<Theme>,
+    current_theme_path: Option<PathBuf>,
+    preview_cache: Vec<Option<ThemeColors>>,
+    filtering_cursor_style_set: bool,
 }
 
 struct ThemesList {
@@ -49,7 +53,6 @@ struct ThemesList {
     filtered_indices: Vec<usize>,
     selected: usize,
     scroll: usize,
-    cached_colors: Option<ThemeColors>,
 }
 
 enum InputMode {
@@ -70,16 +73,14 @@ impl App {
             Ok(items) => (items, None),
             Err(err) => (Vec::new(), Some(format!("Failed to load themes: {err}"))),
         };
-        let current = match get_current_theme(custom_themes_path) {
-            Ok(t) => t,
-            Err(_) => None,
-        };
-        let filtered_indices = items
+        let current_theme_path = get_current_theme_import_path().unwrap_or_default();
+        let filtered_indices: Vec<usize> = items
             .iter()
             .enumerate()
             .filter(|(_, t)| t.category == ThemeCategory::default())
             .map(|(i, _)| i)
             .collect();
+        let preview_cache = (0..items.len()).map(|_| None).collect();
         Self {
             should_exit: false,
             themes: ThemesList {
@@ -87,7 +88,6 @@ impl App {
                 filtered_indices,
                 selected: 0,
                 scroll: 0,
-                cached_colors: None,
             },
             status_message,
             custom_themes_path: custom_themes_path.map(Path::to_path_buf),
@@ -97,7 +97,9 @@ impl App {
             show_preview: config.show_preview,
             quit_on_select: config.quit_on_select,
             selected_tab: 0,
-            current_theme: current,
+            current_theme_path,
+            preview_cache,
+            filtering_cursor_style_set: false,
         }
     }
 
@@ -115,7 +117,7 @@ impl App {
                     let cursor_x = footer_area.x + 1 + self.character_index as u16;
                     let cursor_y = footer_area.y;
                     frame.set_cursor_position(Position::new(cursor_x, cursor_y));
-                    let _ = execute!(std::io::stdout(), SetCursorStyle::SteadyUnderScore);
+                    self.set_filtering_cursor_style();
                 }
             })?;
 
@@ -185,6 +187,7 @@ impl App {
                 }
                 KeyCode::Enter => {
                     self.input_mode = InputMode::Normal;
+                    self.reset_cursor_style();
                 }
                 KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                     self.filter_input.clear();
@@ -203,6 +206,7 @@ impl App {
                     self.filter_input.clear();
                     self.reset_cursor();
                     self.apply_filter(area);
+                    self.reset_cursor_style();
                 }
                 _ => {}
             },
@@ -301,15 +305,14 @@ impl App {
             .iter()
             .enumerate()
             .filter(|(_, theme)| {
-                lower_filter.is_empty() || theme.name_lower.contains(&lower_filter)
+                theme.category == category
+                    && (lower_filter.is_empty() || theme.name_lower.contains(&lower_filter))
             })
-            .filter(|(_, theme)| theme.category == category)
             .map(|(i, _)| i)
             .collect();
 
         if !self.themes.filtered_indices.contains(&old_selected) {
             self.themes.selected = *self.themes.filtered_indices.first().unwrap_or(&0);
-            self.update_cached_colors();
         }
 
         self.adjust_scroll(area);
@@ -345,7 +348,6 @@ impl App {
         let pos = self.filtered_pos();
         if pos + 1 < self.themes.filtered_indices.len() {
             self.themes.selected = self.themes.filtered_indices[pos + 1];
-            self.update_cached_colors();
             self.adjust_scroll(area);
         }
     }
@@ -354,7 +356,6 @@ impl App {
         let pos = self.filtered_pos();
         if pos > 0 {
             self.themes.selected = self.themes.filtered_indices[pos - 1];
-            self.update_cached_colors();
             self.adjust_scroll(area);
         }
     }
@@ -364,7 +365,6 @@ impl App {
         let pos = self.filtered_pos();
         let new_pos = (pos + vis).min(self.themes.filtered_indices.len() - 1);
         self.themes.selected = self.themes.filtered_indices[new_pos];
-        self.update_cached_colors();
         let max_scroll = self
             .themes
             .filtered_indices
@@ -380,7 +380,6 @@ impl App {
         let pos = self.filtered_pos();
         let new_pos = pos.saturating_sub(vis);
         self.themes.selected = self.themes.filtered_indices[new_pos];
-        self.update_cached_colors();
         self.themes.scroll = new_pos.min(
             self.themes
                 .filtered_indices
@@ -393,14 +392,12 @@ impl App {
         if let Some(&idx) = self.themes.filtered_indices.first() {
             self.themes.selected = idx;
             self.themes.scroll = 0;
-            self.update_cached_colors();
         }
     }
 
     fn select_last(&mut self, area: Rect) {
         if let Some(&idx) = self.themes.filtered_indices.last() {
             self.themes.selected = idx;
-            self.update_cached_colors();
             self.adjust_scroll(area);
         }
     }
@@ -425,18 +422,37 @@ impl App {
     }
 
     fn update_cached_colors(&mut self) {
-        let Some(theme) = self.themes.items.get(self.themes.selected) else {
-            self.themes.cached_colors = None;
+        let idx = self.filtered_pos();
+        let Some(theme) = self.themes.items.get(idx) else {
             return;
         };
 
-        self.themes.cached_colors = match ThemeColors::from_path(&theme.path) {
+        let parsed = match ThemeColors::from_path(&theme.path) {
             Ok(c) => Some(c),
             Err(e) => {
                 self.status_message = Some(format!("Failed to load preview: {e}"));
                 None
             }
         };
+
+        self.preview_cache[idx] = parsed;
+    }
+
+    fn set_filtering_cursor_style(&mut self) {
+        if self.filtering_cursor_style_set {
+            return;
+        }
+        let _ = execute!(std::io::stdout(), SetCursorStyle::SteadyUnderScore);
+        self.filtering_cursor_style_set = true;
+    }
+
+    fn reset_cursor_style(&mut self) {
+        if !self.filtering_cursor_style_set {
+            return;
+        }
+
+        let _ = execute!(std::io::stdout(), SetCursorStyle::DefaultUserShape);
+        self.filtering_cursor_style_set = false;
     }
 }
 
@@ -534,9 +550,9 @@ impl App {
             .map(|&idx| {
                 let theme = &self.themes.items[idx];
                 if self
-                    .current_theme
+                    .current_theme_path
                     .as_ref()
-                    .is_some_and(|c| c.name == theme.name)
+                    .is_some_and(|p| *p == theme.path)
                 {
                     return ListItem::from(Line::from(format!(
                         "{} {} (current)",
@@ -568,12 +584,10 @@ impl App {
     fn render_preview(&mut self, area: Rect, buf: &mut Buffer) {
         self.update_cached_colors();
 
-        let colors = match &self.themes.cached_colors {
-            Some(c) => c,
-            None => {
-                self.status_message = Some("Failed to load preview".to_string());
-                return;
-            }
+        let colors = match self.preview_cache.get(self.filtered_pos()) {
+            Some(Some(c)) => c,
+            None => return,
+            _ => return,
         };
 
         let bg = colors.background();

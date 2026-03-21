@@ -134,43 +134,21 @@ impl ThemeColors {
                 .primary_hex
                 .background
                 .as_ref()
-                .map(|h| Self::hex_to_ratatui(h)),
+                .map(|s| hex_to_ratatui(s)),
             foreground: cs
                 .primary_hex
                 .foreground
                 .as_ref()
-                .map(|h| Self::hex_to_ratatui(h)),
-            green: Self::hex_to_ratatui_opt(&cs.normal.green),
-            yellow: Self::hex_to_ratatui_opt(&cs.normal.yellow),
-            blue: Self::hex_to_ratatui_opt(&cs.normal.blue),
-            magenta: Self::hex_to_ratatui_opt(&cs.normal.magenta),
-            cyan: Self::hex_to_ratatui_opt(&cs.normal.cyan),
-            cursor_text: Self::hex_to_ratatui_opt(&cs.cursor_hex.text),
+                .map(|s| hex_to_ratatui(s)),
+            green: hex_to_ratatui_opt(&cs.normal.green),
+            yellow: hex_to_ratatui_opt(&cs.normal.yellow),
+            blue: hex_to_ratatui_opt(&cs.normal.blue),
+            magenta: hex_to_ratatui_opt(&cs.normal.magenta),
+            cyan: hex_to_ratatui_opt(&cs.normal.cyan),
+            cursor_text: hex_to_ratatui_opt(&cs.cursor_hex.text),
         });
 
         Ok(colors)
-    }
-
-    fn hex_to_ratatui_opt(hex: &str) -> Option<Color> {
-        let hex = hex.trim();
-        if hex.is_empty() {
-            return None;
-        }
-
-        let hex = hex.trim_start_matches('#');
-        if hex.len() < 6 {
-            return None;
-        }
-
-        let r = u8::from_str_radix(&hex[0..2], 16).ok()?;
-        let g = u8::from_str_radix(&hex[2..4], 16).ok()?;
-        let b = u8::from_str_radix(&hex[4..6], 16).ok()?;
-
-        Some(Color::Rgb(r, g, b))
-    }
-
-    fn hex_to_ratatui(hex: &str) -> Color {
-        Self::hex_to_ratatui_opt(hex).unwrap_or(Color::Reset)
     }
 
     pub fn background(&self) -> Color {
@@ -228,6 +206,41 @@ impl ThemeColors {
             .and_then(|c| c.cursor_text)
             .unwrap_or(Color::Reset)
     }
+}
+
+fn hex_to_ratatui_opt(hex: &str) -> Option<Color> {
+    let hex = hex.trim().trim_start_matches('#');
+    if hex.len() < 6 {
+        return None;
+    }
+
+    let r = u8::from_str_radix(&hex[0..2], 16).ok()?;
+    let g = u8::from_str_radix(&hex[2..4], 16).ok()?;
+    let b = u8::from_str_radix(&hex[4..6], 16).ok()?;
+
+    Some(Color::Rgb(r, g, b))
+}
+
+fn hex_to_ratatui(hex: &str) -> Color {
+    hex_to_ratatui_opt(hex).unwrap_or(Color::Reset)
+}
+
+fn parse_hex_color(hex: &str) -> Option<Rgb<f64>> {
+    let hex = hex.trim().strip_prefix('#').unwrap_or(hex);
+
+    if hex.len() != 6 {
+        return None;
+    }
+
+    let r = u8::from_str_radix(&hex[0..2], 16).ok()?;
+    let g = u8::from_str_radix(&hex[2..4], 16).ok()?;
+    let b = u8::from_str_radix(&hex[4..6], 16).ok()?;
+
+    Some(Rgb {
+        r: f64::from(r) / 255.0,
+        g: f64::from(g) / 255.0,
+        b: f64::from(b) / 255.0,
+    })
 }
 
 impl Theme {
@@ -318,13 +331,11 @@ pub fn list_themes(custom_path: Option<&Path>) -> Result<Vec<Theme>> {
 
     themes.sort_by(|a, b| a.name.cmp(&b.name));
     let groups = ThemeGroups::from_themes(themes);
-    let themes: Vec<Theme> = groups.dark.into_iter().chain(groups.light).collect();
 
-    Ok(themes)
+    Ok(groups.dark.into_iter().chain(groups.light).collect())
 }
 
-/// Gets the currently active theme from the Alacritty config.
-pub fn get_current_theme(custom_path: Option<&Path>) -> Result<Option<Theme>> {
+pub fn get_current_theme_import_path() -> Result<Option<PathBuf>> {
     let config_path = get_alacritty_config_path()?;
 
     if !config_path.exists() {
@@ -333,31 +344,37 @@ pub fn get_current_theme(custom_path: Option<&Path>) -> Result<Option<Theme>> {
 
     let config = read_config(&config_path)?;
 
-    if config.general.import.is_empty() {
-        return Ok(None);
-    }
+    Ok(config.general.import.first().map(PathBuf::from))
+}
 
-    let theme_path = PathBuf::from(&config.general.import[0]);
+/// Gets the currently active theme from the Alacritty config.
+pub fn get_current_theme(custom_path: Option<&Path>) -> Result<Option<Theme>> {
+    let Some(theme_path) = get_current_theme_import_path()? else {
+        return Ok(None);
+    };
     let themes = list_themes(custom_path)?;
 
     if let Some(theme) = themes.into_iter().find(|t| t.path == theme_path) {
         return Ok(Some(theme));
     }
 
-    Ok(Some(Theme {
-        name: theme_path
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .unwrap_or("unknown")
-            .to_string(),
-        name_lower: theme_path
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .unwrap_or("unknown")
-            .to_lowercase(),
-        path: theme_path,
-        category: ThemeCategory::Dark,
-    }))
+    match Theme::from_path(&theme_path) {
+        Some(theme) => Ok(Some(theme)),
+        None => {
+            let name = theme_path
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("unknown")
+                .to_string();
+            let name_lower = name.to_lowercase();
+            Ok(Some(Theme {
+                name,
+                name_lower,
+                path: theme_path,
+                category: ThemeCategory::Dark,
+            }))
+        }
+    }
 }
 
 /// Looks up a theme by name (exact match or case-insensitive).
@@ -369,29 +386,10 @@ pub fn get_theme_by_name(name: &str, custom_path: Option<&Path>) -> Result<Theme
 
     let themes = list_themes(custom_path)?;
 
-    // Try exact match first, then case-insensitive
     themes
         .into_iter()
         .find(|t| t.name == name || t.name.eq_ignore_ascii_case(name))
         .ok_or_else(|| AlthemerError::ThemeNotFound(name.to_string()))
-}
-
-fn parse_hex_color(hex: &str) -> Option<Rgb<f64>> {
-    let hex = hex.strip_prefix('#').unwrap_or(hex);
-
-    if hex.len() != 6 {
-        return None;
-    }
-
-    let r = u8::from_str_radix(&hex[0..2], 16).ok()?;
-    let g = u8::from_str_radix(&hex[2..4], 16).ok()?;
-    let b = u8::from_str_radix(&hex[4..6], 16).ok()?;
-
-    Some(Rgb {
-        r: f64::from(r) / 255.0,
-        g: f64::from(g) / 255.0,
-        b: f64::from(b) / 255.0,
-    })
 }
 
 #[cfg(test)]
@@ -424,7 +422,7 @@ mod tests {
     fn theme_from_path_works_on_any_file() {
         let dir = tempfile::tempdir().expect("Failed to create temp dir");
         let path = dir.path().join("theme.toml");
-        fs::write(&path, "").expect("Failed to write temp file");
+        fs::write(&path, "").expect("Failed to write theme file");
 
         let result = Theme::from_path(&path);
 
@@ -489,11 +487,8 @@ mod tests {
     #[test]
     fn parse_hex_color_valid() {
         let rgb = parse_hex_color("#282a36").unwrap();
-        // 0x28 = 40, 40/255 ≈ 0.157
         assert!((rgb.r - 0.157).abs() < 0.01);
-        // 0x2a = 42, 42/255 ≈ 0.165
         assert!((rgb.g - 0.165).abs() < 0.01);
-        // 0x36 = 54, 54/255 ≈ 0.212
         assert!((rgb.b - 0.212).abs() < 0.01);
     }
 
@@ -564,7 +559,6 @@ foreground = "#f8f8f2"
     #[test]
     fn filename_suffix_overrides_luminance() {
         let dir = tempfile::tempdir().unwrap();
-        // bright background but _dark suffix — filename wins
         let mut theme = create_theme_file(
             &dir,
             "custom_dark",

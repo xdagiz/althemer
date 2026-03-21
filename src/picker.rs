@@ -1,52 +1,42 @@
 use nucleo_picker::{Picker, PickerOptions, render::StrRenderer};
 
+use crate::config::AlthemerConfig;
 use crate::themes::{Theme, ThemeCategory};
 
 /// Pick a theme from a list
-pub fn pick_theme(themes: &[Theme], current: Option<&Theme>) -> Option<Theme> {
-    let mut sorted_themes = themes.to_vec();
+pub fn pick_theme(
+    themes: &[Theme],
+    current: Option<&Theme>,
+    config: &AlthemerConfig,
+) -> Option<Theme> {
+    let current_name = current.map(|t| t.name.as_str());
 
-    // sort uppercase first, then alphabetically (case-insensitive)
-    sorted_themes.sort_by(|a, b| {
-        let a_has_upper = a.name.chars().any(|c| c.is_uppercase());
-        let b_has_upper = b.name.chars().any(|c| c.is_uppercase());
-
-        match (a_has_upper, b_has_upper) {
-            (true, false) => std::cmp::Ordering::Less,
-            (false, true) => std::cmp::Ordering::Greater,
-            _ => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
-        }
-    });
-
-    let items: Vec<String> = sorted_themes
+    let items: Vec<String> = themes
         .iter()
         .map(|t| {
-            if current.is_some_and(|c| c.name == t.name) {
-                format!("{} {} ●", t.category.icon(), t.name)
+            let marker = if current_name == Some(t.name.as_str()) {
+                " ●"
             } else {
-                format!("{} {}", t.category.icon(), t.name)
-            }
+                ""
+            };
+            format!("{} {}{}", t.category.icon(), t.name, marker)
         })
         .collect();
 
-    // TODO: add config option for `reversed` and `sort_results`
     let mut picker: Picker<String, _> = PickerOptions::new()
-        .reversed(true)
+        .reversed(config.picker_reversed)
         .highlight(true)
-        // .sort_results(false)
+        .sort_results(config.picker_sort_results)
         .picker(StrRenderer);
 
     picker.extend(items);
 
-    if let Ok(Some(selection)) = picker.pick() {
+    picker.pick().ok().flatten().and_then(|selection| {
         let name = selection
             .trim_end_matches(" ●")
             .trim_start_matches(ThemeCategory::Dark.icon())
             .trim_start_matches(ThemeCategory::Light.icon())
             .trim();
-        sorted_themes.into_iter().find(|t| t.name == name)
-    } else {
-        println!("No theme selected");
-        None
-    }
+        themes.iter().find(|t| t.name == name).cloned()
+    })
 }

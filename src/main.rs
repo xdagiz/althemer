@@ -10,7 +10,7 @@ use std::path::PathBuf;
 use clap::Parser;
 use config::{AlthemerConfig, Cli, Commands};
 use error::{AlthemerError, Result};
-use inquire::Text;
+use inquire::{Confirm, Text};
 use switcher::{select_theme, switch_theme};
 use themes::{get_current_theme, list_themes};
 use tui::App;
@@ -18,7 +18,7 @@ use tui::App;
 fn main() -> Result<()> {
     let cli = Cli::parse();
 
-    let mut config = AlthemerConfig::load(cli.config.as_deref())?;
+    let config = AlthemerConfig::load(cli.config.as_deref())?;
     let themes_path = cli.themes.as_deref().or(config.themes_dir.as_deref());
     if cli.command.is_none() {
         return ratatui::run(|term| App::new(themes_path, &config).run(term))
@@ -26,16 +26,15 @@ fn main() -> Result<()> {
     }
 
     match &cli.command {
-        Some(Commands::List) => match select_theme(themes_path) {
+        Some(Commands::List) => match select_theme(themes_path, &config) {
             Ok(t) => {
                 let theme = switch_theme(&t.name, themes_path)?;
                 println!("✓ Switched to theme: {}", theme.name);
             }
             Err(AlthemerError::NoTerminal) => {
                 let themes = list_themes(themes_path)?;
-                println!("Available themes ({} total):", themes.len());
                 for theme in themes {
-                    println!("  - {}", theme.name);
+                    println!("{}", theme.name);
                 }
             }
             Err(e) => return Err(e),
@@ -54,16 +53,35 @@ fn main() -> Result<()> {
             println!("✓ Switched to theme: {}", theme.name);
         }
         Some(Commands::Configure) => {
-            let themes_dir = Text::new("Enter path to themes dir:")
+            let mut config = config;
+
+            let themes_dir = Text::new("Enter path to themes dir (leave empty to set default):")
                 .prompt()
                 .map_err(|e| AlthemerError::ConfigurationError(e.to_string()))?;
-            if !themes_dir.is_empty() {
+
+            if themes_dir.is_empty() && config.themes_dir.is_none() {
+                if let Some(path) = dirs::config_dir() {
+                    config.themes_dir = Some(path.join("alacritty").join("themes"));
+                }
+            } else if !themes_dir.is_empty() {
                 config.themes_dir = Some(PathBuf::from(&themes_dir));
-                config.save()?;
-                println!("✓ Successfully configured!");
-            } else {
-                println!("Nothing changed!");
             }
+
+            let show_preview = Confirm::new("Enable theme preview?")
+                .with_default(config.show_preview)
+                .prompt()
+                .map_err(|e| AlthemerError::ConfigurationError(e.to_string()))?;
+
+            let quit_on_select = Confirm::new("Quit after applying a theme?")
+                .with_default(config.quit_on_select)
+                .prompt()
+                .map_err(|e| AlthemerError::ConfigurationError(e.to_string()))?;
+
+            config.show_preview = show_preview;
+            config.quit_on_select = quit_on_select;
+            config.save()?;
+
+            println!("✓ Successfully configured!");
         }
         None => unreachable!(),
     }

@@ -4,9 +4,9 @@ use std::path::{Path, PathBuf};
 use crate::error::{AlthemerError, Result};
 use dirs::home_dir;
 
-#[derive(Debug, Clone, Deserialize, Serialize, Default, PartialEq)]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
 pub struct AlthemerConfig {
-    #[serde(default)]
+    #[serde(default = "default_themes_dir")]
     pub themes_dir: Option<PathBuf>,
 
     #[serde(default = "default_show_preview")]
@@ -14,6 +14,24 @@ pub struct AlthemerConfig {
 
     #[serde(default = "default_quit_on_select")]
     pub quit_on_select: bool,
+
+    #[serde(default = "default_picker_reversed")]
+    pub picker_reversed: bool,
+
+    #[serde(default = "default_picker_sort_results")]
+    pub picker_sort_results: bool,
+}
+
+impl Default for AlthemerConfig {
+    fn default() -> Self {
+        Self {
+            themes_dir: default_themes_dir(),
+            show_preview: default_show_preview(),
+            quit_on_select: default_quit_on_select(),
+            picker_reversed: default_picker_reversed(),
+            picker_sort_results: default_picker_sort_results(),
+        }
+    }
 }
 
 fn default_show_preview() -> bool {
@@ -22,6 +40,18 @@ fn default_show_preview() -> bool {
 
 fn default_quit_on_select() -> bool {
     false
+}
+
+fn default_picker_reversed() -> bool {
+    true
+}
+
+fn default_picker_sort_results() -> bool {
+    false
+}
+
+fn default_themes_dir() -> Option<PathBuf> {
+    alacritty_config_dir().map(|p| p.join("themes"))
 }
 
 pub fn get_althemer_config_dir() -> Result<PathBuf> {
@@ -54,7 +84,7 @@ pub fn get_themes_dir(custom_path: Option<&Path>) -> Result<PathBuf> {
 
     let alacritty_dir = alacritty_config_dir()
         .ok_or_else(|| AlthemerError::ConfigNotFound(PathBuf::from("~/.config/alacritty")))?;
-    let themes_dir = alacritty_dir.join("themes").join("themes");
+    let themes_dir = alacritty_dir.join("themes");
     if !themes_dir.exists() {
         return Err(AlthemerError::ThemesDirNotFound(themes_dir));
     }
@@ -66,6 +96,18 @@ fn alacritty_config_dir() -> Option<PathBuf> {
     dirs::config_dir().map(|p| p.join("alacritty"))
 }
 
+fn normalize_config(mut config: AlthemerConfig) -> AlthemerConfig {
+    if config
+        .themes_dir
+        .as_ref()
+        .is_some_and(|p| p.as_os_str().is_empty())
+    {
+        config.themes_dir = None;
+    }
+
+    config
+}
+
 impl AlthemerConfig {
     pub fn load(path: Option<&Path>) -> Result<Self> {
         let config_path = match path {
@@ -74,14 +116,12 @@ impl AlthemerConfig {
         };
 
         if !config_path.exists() {
-            // TODO: notify the user we didn't load the config from the path cuz it doesn't exist
             return Ok(AlthemerConfig::default());
         }
 
         let content = std::fs::read_to_string(&config_path)?;
         let config: AlthemerConfig = serde_json::from_str(&content)?;
-
-        Ok(config)
+        Ok(normalize_config(config))
     }
 
     pub fn save(&self) -> Result<()> {
@@ -124,7 +164,19 @@ mod tests {
         let config_path = dir.path().join("config.json");
         let config =
             AlthemerConfig::load(Some(&config_path)).expect("Should handle missing config");
-        assert_eq!(config.themes_dir, None);
+        assert!(config.themes_dir.is_some());
+    }
+
+    #[test]
+    fn empty_themes_dir_becomes_none() {
+        let dir = TempDir::new().expect("Failed to create temp dir");
+        let config_path = dir.path().join("config.json");
+
+        let json = r#"{"themes_dir": ""}"#;
+        fs::write(&config_path, json).expect("Failed to write config");
+
+        let config = AlthemerConfig::load(Some(&config_path)).expect("Should load config");
+        assert!(config.themes_dir.is_none());
     }
 
     #[test]
@@ -142,5 +194,11 @@ mod tests {
 
         let loaded = AlthemerConfig::load(Some(&config_path)).expect("Should load");
         assert_eq!(loaded, config);
+    }
+
+    #[test]
+    fn default_config_has_show_preview_true() {
+        let config = AlthemerConfig::default();
+        assert!(config.show_preview);
     }
 }
