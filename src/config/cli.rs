@@ -7,11 +7,11 @@ use std::path::PathBuf;
 #[command(version)]
 pub struct Cli {
     /// Path to althemer config file [default: ~/.config/althemer/config.json]
-    #[arg(long, global = true)]
+    #[arg(long, short, global = true)]
     pub config: Option<PathBuf>,
 
-    /// Custom themes directory
-    #[arg(long, global = true)]
+    /// Custom themes directory [default: ~/.config/alacritty/themes]
+    #[arg(long, short, global = true)]
     pub themes: Option<PathBuf>,
 
     #[command(subcommand)]

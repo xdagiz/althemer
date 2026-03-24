@@ -2,8 +2,7 @@ use ratatui::style::Color;
 use relative_luminance::{Luminance, Rgb};
 use serde::Deserialize;
 
-use crate::config::alacritty::{get_alacritty_config_path, read_config};
-use crate::config::configuration::get_themes_dir;
+use crate::config::alacritty::{get_alacritty_config_path, get_themes_dir, read_config};
 use crate::error::{AlthemerError, Result};
 use std::path::{Path, PathBuf};
 
@@ -94,6 +93,7 @@ pub struct PrimaryColorsHex {
 struct CachedColors {
     background: Option<Color>,
     foreground: Option<Color>,
+    red: Option<Color>,
     green: Option<Color>,
     yellow: Option<Color>,
     blue: Option<Color>,
@@ -110,6 +110,8 @@ pub struct CursorColorsHex {
 
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct NormalColors {
+    #[serde(default)]
+    pub red: String,
     #[serde(default)]
     pub green: String,
     #[serde(default)]
@@ -140,6 +142,7 @@ impl ThemeColors {
                 .foreground
                 .as_ref()
                 .map(|s| hex_to_ratatui(s)),
+            red: hex_to_ratatui_opt(&cs.normal.red),
             green: hex_to_ratatui_opt(&cs.normal.green),
             yellow: hex_to_ratatui_opt(&cs.normal.yellow),
             blue: hex_to_ratatui_opt(&cs.normal.blue),
@@ -162,6 +165,13 @@ impl ThemeColors {
         self.cached
             .as_ref()
             .and_then(|c| c.foreground)
+            .unwrap_or(Color::Reset)
+    }
+
+    pub fn red(&self) -> Color {
+        self.cached
+            .as_ref()
+            .and_then(|c| c.red)
             .unwrap_or(Color::Reset)
     }
 
@@ -311,7 +321,7 @@ pub fn list_themes(custom_path: Option<&Path>) -> Result<Vec<Theme>> {
     let themes_dir = get_themes_dir(custom_path)?;
     let themes_dir_canonical = themes_dir.canonicalize().ok();
 
-    let mut themes: Vec<Theme> = std::fs::read_dir(&themes_dir)?
+    let themes: Vec<Theme> = std::fs::read_dir(&themes_dir)?
         .filter_map(|entry| entry.ok())
         .filter(|entry| {
             entry
@@ -329,13 +339,18 @@ pub fn list_themes(custom_path: Option<&Path>) -> Result<Vec<Theme>> {
         })
         .collect();
 
-    themes.sort_by(|a, b| a.name.cmp(&b.name));
     let groups = ThemeGroups::from_themes(themes);
+    let mut themes = groups
+        .dark
+        .into_iter()
+        .chain(groups.light)
+        .collect::<Vec<_>>();
+    themes.sort_by(|a, b| a.name.cmp(&b.name));
 
-    Ok(groups.dark.into_iter().chain(groups.light).collect())
+    Ok(themes)
 }
 
-pub fn get_current_theme_import_path() -> Result<Option<PathBuf>> {
+pub fn get_current_theme_path() -> Result<Option<PathBuf>> {
     let config_path = get_alacritty_config_path()?;
 
     if !config_path.exists() {
@@ -349,7 +364,7 @@ pub fn get_current_theme_import_path() -> Result<Option<PathBuf>> {
 
 /// Gets the currently active theme from the Alacritty config.
 pub fn get_current_theme(custom_path: Option<&Path>) -> Result<Option<Theme>> {
-    let Some(theme_path) = get_current_theme_import_path()? else {
+    let Some(theme_path) = get_current_theme_path()? else {
         return Ok(None);
     };
     let themes = list_themes(custom_path)?;

@@ -70,7 +70,6 @@ Althemer looks for themes in:
 
 1. `--themes` CLI argument
 2. `themes_dir` in config file (default: `~/.config/althemer/config.json`)
-3. Environment variable `ALTHEMER_THEMES_DIR`
 
 ### Config file location
 

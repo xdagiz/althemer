@@ -7,7 +7,7 @@ use crate::{
     },
     error::{AlthemerError, Result},
     picker::pick_theme,
-    themes::{Theme, get_current_theme_import_path, get_theme_by_name, list_themes},
+    themes::{Theme, get_current_theme_path, get_theme_by_name, list_themes},
 };
 
 /// Switches the active Alacritty theme by updating the config file.
@@ -41,7 +41,7 @@ pub fn select_theme(custom_theme_path: Option<&Path>, config: &AlthemerConfig) -
     }
 
     let themes = list_themes(custom_theme_path)?;
-    let current_path = get_current_theme_import_path().ok().flatten();
+    let current_path = get_current_theme_path()?;
     let current = current_path
         .as_ref()
         .and_then(|p| themes.iter().find(|t| &t.path == p));

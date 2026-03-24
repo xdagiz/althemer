@@ -39,3 +39,28 @@ pub fn write_config(path: &Path, config: &AlacrittyConfig) -> Result<()> {
     std::fs::write(path, content)?;
     Ok(())
 }
+
+pub fn get_themes_dir(custom_path: Option<&Path>) -> Result<PathBuf> {
+    if let Some(path) = custom_path {
+        let mut themes_dir = path.to_path_buf();
+
+        if themes_dir.starts_with("~") {
+            themes_dir =
+                PathBuf::from(shellexpand::tilde(&themes_dir.display().to_string()).as_ref());
+        }
+
+        if !themes_dir.exists() {
+            return Err(AlthemerError::ThemesDirNotFound(themes_dir));
+        }
+
+        return Ok(themes_dir);
+    }
+
+    let alacritty_dir = get_alacritty_config_dir()?;
+    let themes_dir = alacritty_dir.join("themes");
+    if !themes_dir.exists() {
+        return Err(AlthemerError::ThemesDirNotFound(themes_dir));
+    }
+
+    Ok(themes_dir)
+}

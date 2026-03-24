@@ -1,11 +1,4 @@
-mod config;
-mod error;
-mod picker;
-mod switcher;
-mod themes;
-mod tui;
-
-use std::path::PathBuf;
+use std::{path::PathBuf, process};
 
 use clap::Parser;
 use config::{AlthemerConfig, Cli, Commands};
@@ -15,17 +8,31 @@ use switcher::{select_theme, switch_theme};
 use themes::{get_current_theme, list_themes};
 use tui::App;
 
-fn main() -> Result<()> {
+mod config;
+mod error;
+mod picker;
+mod switcher;
+mod themes;
+mod tui;
+
+fn main() {
+    if let Err(e) = run() {
+        eprintln!("\x1b[91m\rerror:\x1b[0m {e}");
+        process::exit(1);
+    }
+}
+
+fn run() -> Result<()> {
     let cli = Cli::parse();
 
-    let config = AlthemerConfig::load(cli.config.as_deref())?;
+    let config = AlthemerConfig::new(&cli)?;
     let themes_path = cli.themes.as_deref().or(config.themes_dir.as_deref());
-    if cli.command.is_none() {
-        return ratatui::run(|term| App::new(themes_path, &config).run(term))
-            .map_err(|e| AlthemerError::InteractiveError(e.to_string()));
-    }
 
-    match &cli.command {
+    match cli.command {
+        // directly run the tui if no args are passed
+        None => ratatui::run(|term| App::new(themes_path, &config).run(term))
+            .map_err(|e| AlthemerError::InteractiveError(e.to_string()))?,
+        // handle subcommands
         Some(Commands::List) => match select_theme(themes_path, &config) {
             Ok(t) => {
                 let theme = switch_theme(&t.name, themes_path)?;
@@ -49,7 +56,7 @@ fn main() -> Result<()> {
             Err(err) => return Err(err),
         },
         Some(Commands::Switch { theme }) => {
-            let theme = switch_theme(theme, themes_path)?;
+            let theme = switch_theme(&theme, themes_path)?;
             println!("✓ Switched to theme: {}", theme.name);
         }
         Some(Commands::Configure) => {
@@ -83,7 +90,6 @@ fn main() -> Result<()> {
 
             println!("✓ Successfully configured!");
         }
-        None => unreachable!(),
     }
 
     Ok(())

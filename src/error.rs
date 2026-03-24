@@ -3,7 +3,7 @@ use std::path::PathBuf;
 
 #[derive(Debug, thiserror::Error)]
 pub enum AlthemerError {
-    #[error("Failed to read directory: {0}")]
+    #[error("I/O error: {0}")]
     DirectoryRead(#[from] io::Error),
 
     #[error("Config file not found at: {0}")]

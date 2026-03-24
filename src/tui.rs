@@ -1,8 +1,6 @@
 use crate::config::AlthemerConfig;
 use crate::switcher::switch_theme;
-use crate::themes::{
-    Theme, ThemeCategory, ThemeColors, get_current_theme_import_path, list_themes,
-};
+use crate::themes::{Theme, ThemeCategory, ThemeColors, get_current_theme_path, list_themes};
 use crossterm::{
     cursor::SetCursorStyle,
     event::{self, KeyCode, KeyEvent, KeyEventKind, KeyModifiers},
@@ -35,7 +33,7 @@ const SELECTED_STYLE: Style = Style::new()
 pub struct App {
     should_exit: bool,
     themes: ThemesList,
-    status_message: Option<String>,
+    status_message: Option<StatusMessage>,
     custom_themes_path: Option<PathBuf>,
     input_mode: InputMode,
     filter_input: String,
@@ -60,6 +58,11 @@ enum InputMode {
     Filtering,
 }
 
+enum StatusMessage {
+    Info(String),
+    Err(String),
+}
+
 impl Default for App {
     fn default() -> Self {
         Self::new(None, &AlthemerConfig::default())
@@ -69,11 +72,17 @@ impl Default for App {
 impl App {
     pub fn new(custom_themes_path: Option<&Path>, config: &AlthemerConfig) -> Self {
         let (items, status_message) = match list_themes(custom_themes_path) {
-            Ok(items) if items.is_empty() => (items, Some("No themes found".to_string())),
+            Ok(items) if items.is_empty() => (
+                items,
+                Some(StatusMessage::Info("No themes found".to_string())),
+            ),
             Ok(items) => (items, None),
-            Err(err) => (Vec::new(), Some(format!("Failed to load themes: {err}"))),
+            Err(err) => (
+                Vec::new(),
+                Some(StatusMessage::Err(format!("Failed to load themes: {err}"))),
+            ),
         };
-        let current_theme_path = get_current_theme_import_path().unwrap_or_default();
+        let current_theme_path = get_current_theme_path().unwrap_or_default();
         let filtered_indices: Vec<usize> = items
             .iter()
             .enumerate()
@@ -178,7 +187,7 @@ impl App {
                     }
                     self.apply_filter(area);
                 }
-                KeyCode::Enter => self.confirm_selection(),
+                KeyCode::Enter => self.apply_theme(),
                 _ => {}
             },
             InputMode::Filtering if key.kind == KeyEventKind::Press => match key.code {
@@ -316,6 +325,7 @@ impl App {
         }
 
         self.adjust_scroll(area);
+        self.update_cached_colors();
     }
 
     fn filtered_pos(&self) -> usize {
@@ -361,6 +371,9 @@ impl App {
     }
 
     fn page_down(&mut self, area: Rect) {
+        if self.themes.filtered_indices.is_empty() {
+            return;
+        }
         let vis = self.visible_count(area) / 2;
         let pos = self.filtered_pos();
         let new_pos = (pos + vis).min(self.themes.filtered_indices.len() - 1);
@@ -376,6 +389,9 @@ impl App {
     }
 
     fn page_up(&mut self, area: Rect) {
+        if self.themes.filtered_indices.is_empty() {
+            return;
+        }
         let vis = self.visible_count(area) / 2;
         let pos = self.filtered_pos();
         let new_pos = pos.saturating_sub(vis);
@@ -402,17 +418,21 @@ impl App {
         }
     }
 
-    fn confirm_selection(&mut self) {
+    fn apply_theme(&mut self) {
         let Some(theme) = self.themes.items.get(self.themes.selected) else {
             return;
         };
 
         match switch_theme(&theme.name, self.custom_themes_path.as_deref()) {
             Ok(applied) => {
-                self.status_message = Some(format!("Applied theme: {}", applied.name));
+                self.status_message = Some(StatusMessage::Info(format!(
+                    "Applied theme: {}",
+                    applied.name
+                )));
             }
             Err(err) => {
-                self.status_message = Some(format!("Failed to apply theme: {err}"));
+                self.status_message =
+                    Some(StatusMessage::Err(format!("Failed to apply theme: {err}")));
             }
         }
 
@@ -422,7 +442,7 @@ impl App {
     }
 
     fn update_cached_colors(&mut self) {
-        let idx = self.filtered_pos();
+        let idx = self.themes.selected;
         let Some(theme) = self.themes.items.get(idx) else {
             return;
         };
@@ -430,7 +450,8 @@ impl App {
         let parsed = match ThemeColors::from_path(&theme.path) {
             Ok(c) => Some(c),
             Err(e) => {
-                self.status_message = Some(format!("Failed to load preview: {e}"));
+                self.status_message =
+                    Some(StatusMessage::Err(format!("Failed to load preview: {e}")));
                 None
             }
         };
@@ -496,48 +517,6 @@ impl App {
         .render(area, buf);
     }
 
-    fn render_footer(&mut self, area: Rect, buf: &mut Buffer) {
-        match self.input_mode {
-            InputMode::Normal => {
-                let mut left_spans: Vec<Span> = vec![];
-                if let Some(msg) = &self.status_message {
-                    left_spans.push(
-                        Span::from(format!(" {} ", msg))
-                            .fg(Color::Red)
-                            .bg(SURFACE_COLOR),
-                    );
-                } else if let Some(theme) = self.themes.items.get(self.themes.selected) {
-                    left_spans.push(
-                        Span::from(format!(" {} ", theme.path.display()))
-                            .fg(TEXT_COLOR)
-                            .bg(SURFACE_COLOR),
-                    );
-                }
-
-                let right_span =
-                    Span::from(" enter: apply • /: filter • q: quit ").fg(SUBTEXT_COLOR);
-                let right_line = Line::from(right_span);
-
-                let footer_layout = Layout::horizontal([
-                    Constraint::Fill(1),
-                    Constraint::Length(right_line.width() as u16),
-                ]);
-                let [left_area, right_area] = area.layout(&footer_layout);
-
-                Paragraph::new(Line::from(left_spans)).render(left_area, buf);
-                Paragraph::new(right_line).render(right_area, buf);
-            }
-            InputMode::Filtering => {
-                let spans = vec![
-                    Span::from("/").italic().fg(Color::Yellow),
-                    Span::from(&self.filter_input).fg(TEXT_COLOR),
-                ];
-
-                Paragraph::new(Line::from(spans)).render(area, buf);
-            }
-        }
-    }
-
     fn render_list(&mut self, area: Rect, buf: &mut Buffer) {
         let block = Block::default().padding(Padding::uniform(1));
 
@@ -568,41 +547,49 @@ impl App {
             })
             .collect();
 
-        let list = List::new(items)
-            .block(block)
-            .highlight_style(SELECTED_STYLE)
-            .highlight_symbol("❯ ")
-            .highlight_spacing(HighlightSpacing::Always);
+        if items.is_empty() {
+            Paragraph::new("No themes found")
+                .block(Block::new().padding(Padding::proportional(1)))
+                .fg(Color::Red)
+                .render(area, buf);
+        } else {
+            let list = List::new(items)
+                .block(block)
+                .highlight_style(SELECTED_STYLE)
+                .highlight_symbol("❯ ")
+                .highlight_spacing(HighlightSpacing::Always);
 
-        let mut temp_state = ListState::default();
-        let relative = self.filtered_pos().saturating_sub(self.themes.scroll);
-        temp_state.select(Some(relative));
+            let mut temp_state = ListState::default();
+            let relative = self.filtered_pos().saturating_sub(self.themes.scroll);
+            temp_state.select(Some(relative));
 
-        StatefulWidget::render(list, area, buf, &mut temp_state);
+            StatefulWidget::render(list, area, buf, &mut temp_state);
+        }
     }
 
     fn render_preview(&mut self, area: Rect, buf: &mut Buffer) {
         self.update_cached_colors();
 
-        let colors = match self.preview_cache.get(self.filtered_pos()) {
-            Some(Some(c)) => c,
-            None => return,
-            _ => return,
+        let colors = if let Some(Some(c)) = self.preview_cache.get(self.themes.selected) {
+            c
+        } else {
+            return;
         };
 
         let bg = colors.background();
         let fg = colors.foreground();
-        let blue = colors.blue();
+        let red = colors.red();
         let green = colors.green();
-        let cyan = colors.cyan();
         let yellow = colors.yellow();
+        let blue = colors.blue();
         let magenta = colors.magenta();
+        let cyan = colors.cyan();
 
         let block = Block::default().padding(Padding::new(
-            area.height / 4,
+            area.width / 8,
             area.width / 8,
             area.height / 8,
-            area.width / 6,
+            area.height / 4,
         ));
 
         let prompt_line = || {
@@ -637,11 +624,76 @@ impl App {
         let inner_block = Block::new().bg(bg).padding(Padding::proportional(1));
         inner_area.height = inner_area.height.max(16).min(area.height.saturating_sub(4));
 
-        block.render(area, buf);
         Paragraph::new(text)
             .block(inner_block)
             .alignment(Alignment::Left)
             .wrap(Wrap { trim: true })
             .render(inner_area, buf);
+
+        let palette_block = Block::new().padding(Padding::new(0, 0, inner_area.height - 1, 0));
+        Paragraph::new(Line::from(vec![
+            Span::from("    ").fg(red).bg(red),
+            Span::from("    ").fg(green).bg(green),
+            Span::from("    ").fg(yellow).bg(yellow),
+            Span::from("    ").fg(blue).bg(blue),
+            Span::from("    ").fg(magenta).bg(magenta),
+            Span::from("    ").fg(cyan).bg(cyan),
+        ]))
+        .block(palette_block)
+        .alignment(Alignment::Center)
+        .render(inner_area, buf);
+    }
+
+    fn render_footer(&mut self, area: Rect, buf: &mut Buffer) {
+        match self.input_mode {
+            InputMode::Normal => {
+                let mut left_spans: Vec<Span> = vec![];
+                if let Some(msg) = &self.status_message {
+                    match msg {
+                        StatusMessage::Info(m) => {
+                            left_spans.push(
+                                Span::from(format!(" {} ", m))
+                                    .fg(Color::Cyan)
+                                    .bg(SURFACE_COLOR),
+                            );
+                        }
+                        StatusMessage::Err(err) => {
+                            left_spans.push(
+                                Span::from(format!(" {} ", err))
+                                    .fg(Color::Red)
+                                    .bg(SURFACE_COLOR),
+                            );
+                        }
+                    }
+                } else if let Some(theme) = self.themes.items.get(self.themes.selected) {
+                    left_spans.push(
+                        Span::from(format!(" {} ", theme.path.display()))
+                            .fg(TEXT_COLOR)
+                            .bg(SURFACE_COLOR),
+                    );
+                }
+
+                let right_span =
+                    Span::from(" enter: apply • /: filter • q: quit ").fg(SUBTEXT_COLOR);
+                let right_line = Line::from(right_span);
+
+                let footer_layout = Layout::horizontal([
+                    Constraint::Fill(1),
+                    Constraint::Length(right_line.width() as u16),
+                ]);
+                let [left_area, right_area] = area.layout(&footer_layout);
+
+                Paragraph::new(Line::from(left_spans)).render(left_area, buf);
+                Paragraph::new(right_line).render(right_area, buf);
+            }
+            InputMode::Filtering => {
+                let spans = vec![
+                    Span::from("/").italic().fg(Color::Yellow),
+                    Span::from(&self.filter_input).fg(TEXT_COLOR),
+                ];
+
+                Paragraph::new(Line::from(spans)).render(area, buf);
+            }
+        }
     }
 }
