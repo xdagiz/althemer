@@ -1,13 +1,16 @@
 use std::{path::PathBuf, process};
 
 use clap::Parser;
-use config::{AlthemerConfig, Cli, Commands};
+use cli::{Cli, Commands};
+use config::AlthemerConfig;
 use error::{AlthemerError, Result};
 use inquire::{Confirm, Text};
 use switcher::{select_theme, switch_theme};
 use themes::{get_current_theme, list_themes};
 use tui::App;
 
+mod alacritty;
+mod cli;
 mod config;
 mod error;
 mod picker;
@@ -32,7 +35,7 @@ fn run() -> Result<()> {
         // directly run the tui if no args are passed
         None => ratatui::run(|term| App::new(themes_path, &config).run(term))
             .map_err(|e| AlthemerError::InteractiveError(e.to_string()))?,
-        // handle subcommands
+        // otherwise handle subcommands
         Some(Commands::List) => match select_theme(themes_path, &config) {
             Ok(t) => {
                 let theme = switch_theme(&t.name, themes_path)?;

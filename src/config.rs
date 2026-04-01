@@ -1,5 +1,6 @@
 use crate::{
-    config::{Cli, alacritty::get_themes_dir},
+    alacritty::get_themes_dir,
+    cli::Cli,
     error::{AlthemerError, Result},
 };
 use dirs::home_dir;
@@ -53,7 +54,7 @@ fn default_quit_on_select() -> bool {
 }
 
 fn default_picker_reversed() -> bool {
-    true
+    false
 }
 
 fn default_picker_sort_results() -> bool {
@@ -126,13 +127,12 @@ impl AlthemerConfig {
         let file = File::open(file_path)?;
         let reader = BufReader::new(file);
 
-        let mut config: AlthemerConfig = match serde_json::from_reader(reader) {
-            Ok(config) => config,
-            Err(e) => return Err(AlthemerError::ConfigurationError(e.to_string())),
-        };
-
-        config.config_path = Some(file_path.to_path_buf());
-
-        Ok(config)
+        serde_json::from_reader(reader).map_err(|e| {
+            AlthemerError::ConfigurationError(format!(
+                "Failed to parse config at '{}': {}",
+                file_path.display(),
+                e
+            ))
+        })
     }
 }

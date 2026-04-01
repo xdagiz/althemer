@@ -82,13 +82,14 @@ impl App {
                 Some(StatusMessage::Err(format!("Failed to load themes: {err}"))),
             ),
         };
-        let current_theme_path = get_current_theme_path().unwrap_or_default();
-        let filtered_indices: Vec<usize> = items
+
+        let current_theme_path = get_current_theme_path().ok().flatten();
+        let filtered_indices = items
             .iter()
             .enumerate()
-            .filter(|(_, t)| t.category == ThemeCategory::default())
+            .filter(|(_, t)| t.category() == ThemeCategory::default())
             .map(|(i, _)| i)
-            .collect();
+            .collect::<Vec<_>>();
         let preview_cache = (0..items.len()).map(|_| None).collect();
         Self {
             should_exit: false,
@@ -267,7 +268,7 @@ impl App {
             return;
         }
 
-        let chars: Vec<char> = self.filter_input.chars().collect();
+        let chars = self.filter_input.chars().collect::<Vec<_>>();
         let mut pos = self.character_index;
 
         while pos > 0 && chars[pos - 1].is_whitespace() {
@@ -337,7 +338,7 @@ impl App {
     }
 
     fn visible_count(&self, area: Rect) -> usize {
-        area.height.saturating_sub(5) as usize // footer (1) + top/bottom borders (2) + tabs height + padding (2)
+        area.height.saturating_sub(5) as usize
     }
 
     fn adjust_scroll(&mut self, area: Rect) {
@@ -425,6 +426,7 @@ impl App {
 
         match switch_theme(&theme.name, self.custom_themes_path.as_deref()) {
             Ok(applied) => {
+                self.current_theme_path = Some(applied.path);
                 self.status_message = Some(StatusMessage::Info(format!(
                     "Applied theme: {}",
                     applied.name
@@ -443,6 +445,10 @@ impl App {
 
     fn update_cached_colors(&mut self) {
         let idx = self.themes.selected;
+        if self.preview_cache.get(idx).is_some_and(|c| c.is_some()) {
+            return;
+        }
+
         let Some(theme) = self.themes.items.get(idx) else {
             return;
         };
@@ -524,7 +530,7 @@ impl App {
         let start = self.themes.scroll;
         let end = (start + vis).min(self.themes.filtered_indices.len());
 
-        let items: Vec<ListItem> = self.themes.filtered_indices[start..end]
+        let items = self.themes.filtered_indices[start..end]
             .iter()
             .map(|&idx| {
                 let theme = &self.themes.items[idx];
@@ -533,11 +539,11 @@ impl App {
                     .as_ref()
                     .is_some_and(|p| *p == theme.path)
                 {
-                    return ListItem::from(Line::from(format!(
-                        "{} {} (current)",
-                        theme.category.icon(),
-                        theme.name
-                    )));
+                    return ListItem::from(Line::from(
+                        format!("{} {} ●", theme.category.icon(), theme.name)
+                            .italic()
+                            .bold(),
+                    ));
                 }
                 ListItem::from(Line::from(format!(
                     "{} {}",
@@ -545,7 +551,7 @@ impl App {
                     theme.name
                 )))
             })
-            .collect();
+            .collect::<Vec<_>>();
 
         if items.is_empty() {
             Paragraph::new("No themes found")

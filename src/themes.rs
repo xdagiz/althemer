@@ -2,7 +2,7 @@ use ratatui::style::Color;
 use relative_luminance::{Luminance, Rgb};
 use serde::Deserialize;
 
-use crate::config::alacritty::{get_alacritty_config_path, get_themes_dir, read_config};
+use crate::alacritty::{get_alacritty_config_path, get_themes_dir, read_config};
 use crate::error::{AlthemerError, Result};
 use std::path::{Path, PathBuf};
 
@@ -37,37 +37,25 @@ impl ThemeCategory {
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct ThemeGroups {
-    pub dark: Vec<Theme>,
-    pub light: Vec<Theme>,
-}
-
-impl ThemeGroups {
-    pub fn from_themes(mut themes: Vec<Theme>) -> Self {
-        for theme in &mut themes {
-            theme.categorize().ok();
-        }
-
-        let mut dark = Vec::new();
-        let mut light = Vec::new();
-        for theme in themes {
-            match theme.category {
-                ThemeCategory::Dark => dark.push(theme),
-                ThemeCategory::Light => light.push(theme),
-            }
-        }
-
-        Self { dark, light }
-    }
-}
-
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct ThemeColors {
     #[serde(default)]
     pub colors: ColorScheme,
     #[serde(skip)]
     cached: Option<CachedColors>,
+}
+
+macro_rules! impl_color_accessors {
+    ($($name:ident),*) => {
+        $(
+            pub fn $name(&self) -> Color {
+                self.cached
+                    .as_ref()
+                    .and_then(|c| c.$name)
+                    .unwrap_or(Color::Reset)
+            }
+        )*
+    };
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -154,68 +142,17 @@ impl ThemeColors {
         Ok(colors)
     }
 
-    pub fn background(&self) -> Color {
-        self.cached
-            .as_ref()
-            .and_then(|c| c.background)
-            .unwrap_or(Color::Reset)
-    }
-
-    pub fn foreground(&self) -> Color {
-        self.cached
-            .as_ref()
-            .and_then(|c| c.foreground)
-            .unwrap_or(Color::Reset)
-    }
-
-    pub fn red(&self) -> Color {
-        self.cached
-            .as_ref()
-            .and_then(|c| c.red)
-            .unwrap_or(Color::Reset)
-    }
-
-    pub fn green(&self) -> Color {
-        self.cached
-            .as_ref()
-            .and_then(|c| c.green)
-            .unwrap_or(Color::Reset)
-    }
-
-    pub fn yellow(&self) -> Color {
-        self.cached
-            .as_ref()
-            .and_then(|c| c.yellow)
-            .unwrap_or(Color::Reset)
-    }
-
-    pub fn blue(&self) -> Color {
-        self.cached
-            .as_ref()
-            .and_then(|c| c.blue)
-            .unwrap_or(Color::Reset)
-    }
-
-    pub fn magenta(&self) -> Color {
-        self.cached
-            .as_ref()
-            .and_then(|c| c.magenta)
-            .unwrap_or(Color::Reset)
-    }
-
-    pub fn cyan(&self) -> Color {
-        self.cached
-            .as_ref()
-            .and_then(|c| c.cyan)
-            .unwrap_or(Color::Reset)
-    }
-
-    pub fn cursor_text(&self) -> Color {
-        self.cached
-            .as_ref()
-            .and_then(|c| c.cursor_text)
-            .unwrap_or(Color::Reset)
-    }
+    impl_color_accessors!(
+        background,
+        foreground,
+        red,
+        green,
+        yellow,
+        blue,
+        magenta,
+        cyan,
+        cursor_text
+    );
 }
 
 fn hex_to_ratatui_opt(hex: &str) -> Option<Color> {
@@ -235,10 +172,9 @@ fn hex_to_ratatui(hex: &str) -> Color {
     hex_to_ratatui_opt(hex).unwrap_or(Color::Reset)
 }
 
-fn parse_hex_color(hex: &str) -> Option<Rgb<f64>> {
-    let hex = hex.trim().strip_prefix('#').unwrap_or(hex);
-
-    if hex.len() != 6 {
+pub fn parse_hex_color(hex: &str) -> Option<Rgb<f64>> {
+    let hex = hex.trim().trim_start_matches('#');
+    if hex.len() < 6 {
         return None;
     }
 
@@ -254,31 +190,21 @@ fn parse_hex_color(hex: &str) -> Option<Rgb<f64>> {
 }
 
 impl Theme {
-    /// Creates a Theme from a file path.
     pub fn from_path(path: &Path) -> Option<Self> {
         let name = path.file_stem()?.to_str()?.to_string();
         let name_lower = name.to_lowercase();
-        Some(Theme {
-            name,
+
+        Some(Self {
             name_lower,
+            name,
             path: path.to_path_buf(),
             category: ThemeCategory::default(),
         })
     }
 
-    pub fn categorize(&mut self) -> Result<()> {
-        if let Some(category) = self.categorize_from_filename() {
-            self.category = category;
-            return Ok(());
-        }
-
-        if let Some(lum) = self.read_luminance()?
-            && lum > 0.5
-        {
-            self.category = ThemeCategory::Light;
-        }
-
-        Ok(())
+    pub fn category(&self) -> ThemeCategory {
+        self.categorize_from_filename()
+            .unwrap_or_else(|| self.categorize_from_luminance().unwrap_or_default())
     }
 
     fn categorize_from_filename(&self) -> Option<ThemeCategory> {
@@ -295,56 +221,40 @@ impl Theme {
         None
     }
 
-    fn read_background_color(&self) -> Result<Option<String>> {
-        let content = std::fs::read_to_string(&self.path)?;
-        let parsed: toml::Value = toml::from_str(&content)?;
-        Ok(parsed
+    fn categorize_from_luminance(&self) -> Option<ThemeCategory> {
+        let content = std::fs::read_to_string(&self.path).ok()?;
+        let parsed: toml::Value = toml::from_str(&content).ok()?;
+
+        let hex = parsed
             .get("colors")
             .and_then(|c| c.get("primary"))
             .and_then(|p| p.get("background"))
-            .and_then(|v| v.as_str())
-            .map(String::from))
-    }
+            .and_then(|v| v.as_str())?;
 
-    fn read_luminance(&self) -> Result<Option<f64>> {
-        let bg = match self.read_background_color()? {
-            Some(hex) => hex,
-            None => return Ok(None),
-        };
+        let rgb = parse_hex_color(hex)?;
+        let luminance = rgb.relative_luminance();
 
-        Ok(parse_hex_color(&bg).map(|rgb| rgb.relative_luminance()))
+        if luminance > 0.5 {
+            Some(ThemeCategory::Light)
+        } else {
+            None
+        }
     }
 }
 
-/// Lists all available themes from the themes directory.
 pub fn list_themes(custom_path: Option<&Path>) -> Result<Vec<Theme>> {
     let themes_dir = get_themes_dir(custom_path)?;
-    let themes_dir_canonical = themes_dir.canonicalize().ok();
 
-    let themes: Vec<Theme> = std::fs::read_dir(&themes_dir)?
+    let mut themes = std::fs::read_dir(themes_dir)?
         .filter_map(|entry| entry.ok())
-        .filter(|entry| {
-            entry
-                .path()
-                .extension()
-                .map(|ext| ext == "toml")
-                .unwrap_or(false)
+        .filter(|entry| entry.path().extension().is_some_and(|ext| ext == "toml"))
+        .filter_map(|entry| Theme::from_path(&entry.path()))
+        .map(|mut theme| {
+            theme.category = theme.category();
+            theme
         })
-        .filter_map(|entry| {
-            let path = entry.path();
-            match (&themes_dir_canonical, path.canonicalize().ok()) {
-                (Some(dir), Some(canonical)) if !canonical.starts_with(dir) => None,
-                _ => Theme::from_path(&path),
-            }
-        })
-        .collect();
-
-    let groups = ThemeGroups::from_themes(themes);
-    let mut themes = groups
-        .dark
-        .into_iter()
-        .chain(groups.light)
         .collect::<Vec<_>>();
+
     themes.sort_by(|a, b| a.name.cmp(&b.name));
 
     Ok(themes)
@@ -362,48 +272,22 @@ pub fn get_current_theme_path() -> Result<Option<PathBuf>> {
     Ok(config.general.import.first().map(PathBuf::from))
 }
 
-/// Gets the currently active theme from the Alacritty config.
 pub fn get_current_theme(custom_path: Option<&Path>) -> Result<Option<Theme>> {
     let Some(theme_path) = get_current_theme_path()? else {
         return Ok(None);
     };
     let themes = list_themes(custom_path)?;
 
-    if let Some(theme) = themes.into_iter().find(|t| t.path == theme_path) {
-        return Ok(Some(theme));
-    }
-
-    match Theme::from_path(&theme_path) {
-        Some(theme) => Ok(Some(theme)),
-        None => {
-            let name = theme_path
-                .file_stem()
-                .and_then(|s| s.to_str())
-                .unwrap_or("unknown")
-                .to_string();
-            let name_lower = name.to_lowercase();
-            Ok(Some(Theme {
-                name,
-                name_lower,
-                path: theme_path,
-                category: ThemeCategory::Dark,
-            }))
-        }
-    }
+    Ok(themes.into_iter().find(|t| t.path == theme_path))
 }
 
-/// Looks up a theme by name (exact match or case-insensitive).
 pub fn get_theme_by_name(name: &str, custom_path: Option<&Path>) -> Result<Theme> {
-    let name = name.trim();
-    if name.is_empty() {
-        return Err(AlthemerError::ThemeNotFound(name.to_string()));
-    }
-
     let themes = list_themes(custom_path)?;
+    let name_lower = name.to_lowercase();
 
     themes
         .into_iter()
-        .find(|t| t.name == name || t.name.eq_ignore_ascii_case(name))
+        .find(|t| t.name_lower == name_lower)
         .ok_or_else(|| AlthemerError::ThemeNotFound(name.to_string()))
 }
 
@@ -542,7 +426,7 @@ mod tests {
     #[test]
     fn light_background_categorizes_as_light() {
         let dir = tempfile::tempdir().unwrap();
-        let mut theme = create_theme_file(
+        let theme = create_theme_file(
             &dir,
             "test_light",
             r##"
@@ -551,14 +435,13 @@ background = "#fbf1c7"
 foreground = "#3c3836"
 "##,
         );
-        theme.categorize().unwrap();
-        assert_eq!(theme.category, ThemeCategory::Light);
+        assert_eq!(theme.category(), ThemeCategory::Light);
     }
 
     #[test]
     fn dark_background_categorizes_as_dark() {
         let dir = tempfile::tempdir().unwrap();
-        let mut theme = create_theme_file(
+        let theme = create_theme_file(
             &dir,
             "test_dark",
             r##"
@@ -567,14 +450,13 @@ background = "#282a36"
 foreground = "#f8f8f2"
 "##,
         );
-        theme.categorize().unwrap();
-        assert_eq!(theme.category, ThemeCategory::Dark);
+        assert_eq!(theme.category(), ThemeCategory::Dark);
     }
 
     #[test]
     fn filename_suffix_overrides_luminance() {
         let dir = tempfile::tempdir().unwrap();
-        let mut theme = create_theme_file(
+        let theme = create_theme_file(
             &dir,
             "custom_dark",
             r##"
@@ -583,37 +465,33 @@ background = "#fbf1c7"
 foreground = "#3c3836"
 "##,
         );
-        theme.categorize().unwrap();
-        assert_eq!(theme.category, ThemeCategory::Dark);
+        assert_eq!(theme.category(), ThemeCategory::Dark);
     }
 
     #[test]
     fn no_colors_section_stays_default_dark() {
         let dir = tempfile::tempdir().unwrap();
-        let mut theme = create_theme_file(
+        let theme = create_theme_file(
             &dir,
             "broken",
             r##"
 some_other_field = "value"
 "##,
         );
-        theme.categorize().unwrap();
-        assert_eq!(theme.category, ThemeCategory::Dark);
+        assert_eq!(theme.category(), ThemeCategory::Dark);
     }
 
     #[test]
     fn light_suffix_categorizes_as_light() {
         let dir = tempfile::tempdir().unwrap();
-        let mut theme = create_theme_file(&dir, "gruvbox_light", r#""#);
-        theme.categorize().unwrap();
-        assert_eq!(theme.category, ThemeCategory::Light);
+        let theme = create_theme_file(&dir, "gruvbox_light", r#""#);
+        assert_eq!(theme.category(), ThemeCategory::Light);
     }
 
     #[test]
     fn dark_suffix_stays_dark() {
         let dir = tempfile::tempdir().unwrap();
-        let mut theme = create_theme_file(&dir, "gruvbox_dark", r#""#);
-        theme.categorize().unwrap();
-        assert_eq!(theme.category, ThemeCategory::Dark);
+        let theme = create_theme_file(&dir, "gruvbox_dark", r#""#);
+        assert_eq!(theme.category(), ThemeCategory::Dark);
     }
 }
