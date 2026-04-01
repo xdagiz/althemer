@@ -35,6 +35,15 @@ pub enum AlthemerError {
 
     #[error("Failed to render preview: {0}")]
     PreviewError(String),
+
+    #[error("Github api error: {0}")]
+    GitHubApi(String),
+
+    #[error("Download failed: {0}")]
+    Download(String),
+
+    #[error("Failed to parse repository url: {0}")]
+    InvalidRepoUrl(String),
 }
 
 pub type Result<T> = std::result::Result<T, AlthemerError>;
