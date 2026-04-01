@@ -3,6 +3,7 @@ use std::{path::PathBuf, process};
 use clap::Parser;
 use cli::{Cli, Commands};
 use config::AlthemerConfig;
+use downloader::download_themes;
 use error::{AlthemerError, Result};
 use inquire::{Confirm, Text};
 use switcher::{select_theme, switch_theme};
@@ -12,6 +13,7 @@ use tui::App;
 mod alacritty;
 mod cli;
 mod config;
+mod downloader;
 mod error;
 mod picker;
 mod switcher;
@@ -61,6 +63,39 @@ fn run() -> Result<()> {
         Some(Commands::Switch { theme }) => {
             let theme = switch_theme(&theme, themes_path)?;
             println!("✓ Switched to theme: {}", theme.name);
+        }
+        Some(Commands::Download {
+            repo,
+            branch,
+            force: _force,
+        }) => {
+            let client = reqwest::Client::new();
+
+            let themes_dir = if let Some(path) = themes_path {
+                PathBuf::from(path)
+            } else if let Some(path) = &config.themes_dir {
+                path.to_path_buf()
+            } else {
+                return Err(AlthemerError::ConfigurationError(
+                    "Themes directory not configured. Use --themes or run 'althemer configure'."
+                        .to_string(),
+                ));
+            };
+
+            let options = downloader::DownloadOptions {
+                repo,
+                branch,
+                force: false,
+            };
+
+            let runtime = tokio::runtime::Runtime::new()?;
+            let downloaded = runtime.block_on(download_themes(&client, &themes_dir, &options))?;
+
+            println!(
+                "✓ Downloaded {} themes to {}",
+                downloaded.len(),
+                themes_dir.display()
+            );
         }
         Some(Commands::Configure) => {
             let mut config = config;

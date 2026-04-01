@@ -20,11 +20,24 @@ pub struct Cli {
 
 #[derive(Subcommand)]
 pub enum Commands {
+    /// Download themes from a github repo
+    Download {
+        #[arg()]
+        repo: Option<String>,
+        #[arg(short = 'b', long)]
+        branch: Option<String>,
+        #[arg(short = 'f', long)]
+        force: bool,
+    },
+    /// List available themes
     List,
+    /// Get the current theme
     Current,
+    /// Switch to a theme
     Switch {
         #[arg()]
         theme: String,
     },
+    /// Configure althemer
     Configure,
 }
