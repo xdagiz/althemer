@@ -2,6 +2,7 @@
 name = "althemer"
 version = "0.2.0"
 edition = "2024"
+repository = "https://github.com/xdagiz/althemer"
 
 [dependencies]
 clap = { version = "4.5.58", features = ["derive"] }
@@ -20,3 +21,8 @@ toml = "1.0.3"
 
 [dev-dependencies]
 tempfile = "3.14"
+
+# The profile that 'dist' will build with
+[profile.dist]
+inherits = "release"
+lto = "thin"
