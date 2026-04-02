@@ -25,8 +25,8 @@ cargo install --locked --path .
 ### Requirements
 
 - Rust
-- Alacritty terminal
-- A themes directory with `.toml` theme files
+- Alacritty
+- A themes directory with `.toml` alacritty theme files
 
 ## Usage
 
@@ -58,6 +58,19 @@ althemer current
 althemer switch <theme-name>
 ```
 
+### Download themes from GitHub
+
+```bash
+# download from the default github repo [alacritty/alacritty-theme]
+althemer download
+# download from a specific repo
+althemer download https://github.com/user/repo # or just user/repo
+# use -b to specify the branch
+althemer download https://github.com/user/repo -b develop
+# -f will overwrite existing themes
+althemer download -f
+```
+
 ### Configure althemer
 
 ```bash
@@ -74,11 +87,13 @@ Althemer looks for themes in:
 ### Config file location
 
 Default: `~/.config/althemer/config.json`
-
-Example:
 ```json
 {
-  "themes_dir": "/path/to/your/themes"
+  "themes_dir": "/home/xdagiz/.config/alacritty/themes",
+  "show_preview": true,
+  "quit_on_select": false,
+  "picker_reversed": false,
+  "picker_sort_results": true
 }
 ```
 

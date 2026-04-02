@@ -1,8 +1,14 @@
 [package]
 name = "althemer"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2024"
+description = "A CLI and interactive TUI to switch between Alacritty themes"
 repository = "https://github.com/xdagiz/althemer"
+license = "MIT"
+keywords = ["alacritty", "theme", "tui", "cli"]
+homepage = "https://github.com/xdagiz/althemer"
+documentation = "https://github.com/xdagiz/althemer#readme"
+authors = ["xdagiz <xdagiz@proton.me>"]
 
 [dependencies]
 clap = { version = "4.5.58", features = ["derive"] }
