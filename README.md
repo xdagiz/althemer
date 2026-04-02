@@ -1,6 +1,6 @@
 # Althemer
 
-A CLI and interactive TUI to switch between Alacritty themes with fuzzy search.
+A CLI and interactive TUI to switch between Alacritty themes.
 
 [![Crates.io](https://img.shields.io/crates/v/althemer.svg)](https://crates.io/crates/althemer)
 [![Rust](https://img.shields.io/badge/Rust-1.75+-orange.svg)](https://www.rust-lang.org)
@@ -16,6 +16,13 @@ A CLI and interactive TUI to switch between Alacritty themes with fuzzy search.
 - **Quick switch** - Switch to any theme by name from the CLI
 - **Download themes** - Fetch theme collections directly from GitHub
 - **Configurable** - Set your themes directory, preview preferences, and more
+
+## Performance
+
+| Tool | Language | Execution Time |
+|------|----------|----------------|
+| [ats](https://github.com/tichopad/alacritty-theme-switch) | TypeScript | ~618ms |
+| [althemer](https://github.com/xdagiz/althemer) | Rust | ~13ms |
 
 ## Installation
 

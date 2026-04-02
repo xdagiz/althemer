@@ -1,3 +1,4 @@
+use clap::CommandFactory;
 use std::{path::PathBuf, process};
 
 use clap::Parser;
@@ -67,7 +68,7 @@ fn run() -> Result<()> {
         Some(Commands::Download {
             repo,
             branch,
-            force: _force,
+            force,
         }) => {
             let client = reqwest::Client::new();
 
@@ -85,7 +86,7 @@ fn run() -> Result<()> {
             let options = downloader::DownloadOptions {
                 repo,
                 branch,
-                force: false,
+                force,
             };
 
             let runtime = tokio::runtime::Runtime::new()?;
@@ -127,6 +128,14 @@ fn run() -> Result<()> {
             config.save()?;
 
             println!("✓ Successfully configured!");
+        }
+        Some(Commands::Completion { shell }) => {
+            clap_complete::generate(
+                shell,
+                &mut Cli::command(),
+                "althemer",
+                &mut std::io::stdout(),
+            );
         }
     }
 

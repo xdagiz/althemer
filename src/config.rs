@@ -3,7 +3,7 @@ use crate::{
     cli::Cli,
     error::{AlthemerError, Result},
 };
-use dirs::home_dir;
+use dirs::config_dir;
 use serde::{Deserialize, Serialize};
 use std::{
     fs::File,
@@ -58,7 +58,7 @@ fn default_picker_reversed() -> bool {
 }
 
 fn default_picker_sort_results() -> bool {
-    false
+    true
 }
 
 fn default_themes_dir() -> Option<PathBuf> {
@@ -70,7 +70,7 @@ fn default_themes_dir() -> Option<PathBuf> {
 }
 
 pub fn get_config_path() -> Option<PathBuf> {
-    home_dir().map(|path| path.join(".config").join("althemer").join("config.json"))
+    config_dir().map(|path| path.join("althemer").join("config.json"))
 }
 
 impl AlthemerConfig {
@@ -80,10 +80,14 @@ impl AlthemerConfig {
         } else {
             match get_config_path() {
                 Some(p) if p.exists() => AlthemerConfig::from_file(&p)?,
-                Some(p) => AlthemerConfig {
-                    config_path: Some(p),
-                    ..Default::default()
-                },
+                Some(p) => {
+                    let config = AlthemerConfig {
+                        config_path: Some(p),
+                        ..Default::default()
+                    };
+                    config.save()?;
+                    config
+                }
                 None => AlthemerConfig::default(),
             }
         };
@@ -95,8 +99,6 @@ impl AlthemerConfig {
                 config.config_path = get_config_path();
             }
         }
-
-        config.save()?;
 
         Ok(config)
     }

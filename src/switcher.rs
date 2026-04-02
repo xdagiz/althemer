@@ -20,11 +20,10 @@ pub fn switch_theme(name: &str, custom_theme_path: Option<&Path>) -> Result<Them
     }
 
     let config = read_config(&config_path)?;
-    let import_path = theme.path.to_string_lossy();
 
     let new_config = AlacrittyConfig {
         general: GeneralConfig {
-            import: vec![import_path.into_owned()],
+            import: vec![theme.path.to_string_lossy().into_owned()],
         },
         other: config.other,
     };

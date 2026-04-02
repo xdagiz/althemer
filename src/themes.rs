@@ -22,14 +22,14 @@ pub enum ThemeCategory {
 }
 
 impl ThemeCategory {
-    pub fn label(&self) -> &'static str {
+    pub fn label(self) -> &'static str {
         match self {
             ThemeCategory::Dark => "Dark",
             ThemeCategory::Light => "Light",
         }
     }
 
-    pub fn icon(&self) -> &'static str {
+    pub fn icon(self) -> &'static str {
         match self {
             ThemeCategory::Dark => "⏾",
             ThemeCategory::Light => "☀",
@@ -116,7 +116,7 @@ impl ThemeColors {
     pub fn from_path(path: &Path) -> Result<Self> {
         let content = std::fs::read_to_string(path)?;
         let mut colors: ThemeColors = toml::from_str(&content)
-            .map_err(|e| AlthemerError::PreviewError(format!("Failed to parse theme: {}", e)))?;
+            .map_err(|e| AlthemerError::PreviewError(format!("Failed to parse theme: {e}")))?;
 
         let cs = &colors.colors;
         colors.cached = Some(CachedColors {
@@ -194,15 +194,18 @@ impl Theme {
         let name = path.file_stem()?.to_str()?.to_string();
         let name_lower = name.to_lowercase();
 
-        Some(Self {
+        let mut theme = Self {
             name_lower,
             name,
             path: path.to_path_buf(),
             category: ThemeCategory::default(),
-        })
+        };
+
+        theme.category = theme.categorize();
+        Some(theme)
     }
 
-    pub fn category(&self) -> ThemeCategory {
+    fn categorize(&self) -> ThemeCategory {
         self.categorize_from_filename()
             .unwrap_or_else(|| self.categorize_from_luminance().unwrap_or_default())
     }
@@ -249,10 +252,6 @@ pub fn list_themes(custom_path: Option<&Path>) -> Result<Vec<Theme>> {
         .filter_map(|entry| entry.ok())
         .filter(|entry| entry.path().extension().is_some_and(|ext| ext == "toml"))
         .filter_map(|entry| Theme::from_path(&entry.path()))
-        .map(|mut theme| {
-            theme.category = theme.category();
-            theme
-        })
         .collect::<Vec<_>>();
 
     themes.sort_by(|a, b| a.name.cmp(&b.name));
@@ -435,7 +434,7 @@ background = "#fbf1c7"
 foreground = "#3c3836"
 "##,
         );
-        assert_eq!(theme.category(), ThemeCategory::Light);
+        assert_eq!(theme.category, ThemeCategory::Light);
     }
 
     #[test]
@@ -450,7 +449,7 @@ background = "#282a36"
 foreground = "#f8f8f2"
 "##,
         );
-        assert_eq!(theme.category(), ThemeCategory::Dark);
+        assert_eq!(theme.category, ThemeCategory::Dark);
     }
 
     #[test]
@@ -465,7 +464,7 @@ background = "#fbf1c7"
 foreground = "#3c3836"
 "##,
         );
-        assert_eq!(theme.category(), ThemeCategory::Dark);
+        assert_eq!(theme.category, ThemeCategory::Dark);
     }
 
     #[test]
@@ -478,20 +477,20 @@ foreground = "#3c3836"
 some_other_field = "value"
 "##,
         );
-        assert_eq!(theme.category(), ThemeCategory::Dark);
+        assert_eq!(theme.category, ThemeCategory::Dark);
     }
 
     #[test]
     fn light_suffix_categorizes_as_light() {
         let dir = tempfile::tempdir().unwrap();
         let theme = create_theme_file(&dir, "gruvbox_light", r#""#);
-        assert_eq!(theme.category(), ThemeCategory::Light);
+        assert_eq!(theme.category, ThemeCategory::Light);
     }
 
     #[test]
     fn dark_suffix_stays_dark() {
         let dir = tempfile::tempdir().unwrap();
         let theme = create_theme_file(&dir, "gruvbox_dark", r#""#);
-        assert_eq!(theme.category(), ThemeCategory::Dark);
+        assert_eq!(theme.category, ThemeCategory::Dark);
     }
 }

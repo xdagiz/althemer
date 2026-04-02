@@ -1,14 +1,20 @@
 use futures_util::StreamExt;
 use indicatif::{ProgressBar, ProgressStyle};
+use regex_lite::Regex;
 use reqwest::Client;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::path::{Path, PathBuf};
+use std::sync::LazyLock;
 use tokio::io::AsyncWriteExt;
 
 use crate::error::{AlthemerError, Result};
 
 const DEFAULT_REPO: &str = "alacritty/alacritty-theme";
 const DEFAULT_BRANCH: &str = "master";
+static HTTPS_REGEX: LazyLock<Regex, fn() -> Regex> =
+    LazyLock::new(|| Regex::new(r"^https?://github\.com/([^/]+)/([^/]+?)(?:\.git)?/?$").unwrap());
+static SSH_REGEX: LazyLock<Regex, fn() -> Regex> =
+    LazyLock::new(|| Regex::new(r"^git@github\.com:([^/]+)/(.+?)(?:\.git)?$").unwrap());
 
 #[derive(Debug, Deserialize)]
 struct TreeItem {
@@ -32,21 +38,14 @@ struct RepoInfo {
 }
 
 fn parse_github_url(url: &str) -> Option<RepoInfo> {
-    if let Some(caps) =
-        regex_lite::Regex::new(r"^https?://github\.com/([^/]+)/([^/]+?)(?:\.git)?/?$")
-            .ok()?
-            .captures(url)
-    {
+    if let Some(caps) = HTTPS_REGEX.captures(url) {
         return Some(RepoInfo {
             owner: caps.get(1)?.as_str().to_string(),
             repo: caps.get(2)?.as_str().to_string(),
         });
     }
 
-    if let Some(caps) = regex_lite::Regex::new(r"^git@github\.com:([^/]+)/(.+?)(?:\.git)?$")
-        .ok()?
-        .captures(url)
-    {
+    if let Some(caps) = SSH_REGEX.captures(url) {
         return Some(RepoInfo {
             owner: caps.get(1)?.as_str().to_string(),
             repo: caps.get(2)?.as_str().to_string(),
@@ -65,24 +64,21 @@ fn parse_github_url(url: &str) -> Option<RepoInfo> {
 }
 
 fn resolve_repo(repo: Option<&str>) -> Result<(String, String)> {
-    match repo {
-        Some(url) => {
-            if let Some(info) = parse_github_url(url) {
-                Ok((info.owner, info.repo))
+    if let Some(url) = repo {
+        if let Some(info) = parse_github_url(url) {
+            Ok((info.owner, info.repo))
+        } else {
+            let parts: Vec<&str> = url.split('/').collect();
+            if parts.len() == 2 {
+                Ok((parts[0].to_string(), parts[1].to_string()))
             } else {
-                let parts: Vec<&str> = url.split('/').collect();
-                if parts.len() == 2 {
-                    Ok((parts[0].to_string(), parts[1].to_string()))
-                } else {
-                    Err(AlthemerError::InvalidRepoUrl(url.to_string()))
-                }
+                Err(AlthemerError::InvalidRepoUrl(url.to_string()))
             }
         }
-        None => {
-            let info = parse_github_url(DEFAULT_REPO)
-                .ok_or_else(|| AlthemerError::InvalidRepoUrl(DEFAULT_REPO.to_string()))?;
-            Ok((info.owner, info.repo))
-        }
+    } else {
+        let info = parse_github_url(DEFAULT_REPO)
+            .ok_or_else(|| AlthemerError::InvalidRepoUrl(DEFAULT_REPO.to_string()))?;
+        Ok((info.owner, info.repo))
     }
 }
 
@@ -104,7 +100,7 @@ pub async fn make_github_request<T: AsRef<str> + reqwest::IntoUrl>(
 
 pub fn deserialize_response<T: DeserializeOwned>(response: &str) -> Result<T> {
     let value: serde_json::Value = serde_json::from_str(response)
-        .map_err(|e| AlthemerError::GitHubApi(format!("Failed to parse JSON: {}", e)))?;
+        .map_err(|e| AlthemerError::GitHubApi(format!("Failed to parse JSON: {e}")))?;
 
     if value.get("message").is_some() {
         let result: ErrorResponse = serde_json::from_value(value)?;
@@ -112,7 +108,7 @@ pub fn deserialize_response<T: DeserializeOwned>(response: &str) -> Result<T> {
     }
 
     serde_json::from_value(value)
-        .map_err(|e| AlthemerError::GitHubApi(format!("Failed to deserialize: {}", e)))
+        .map_err(|e| AlthemerError::GitHubApi(format!("Failed to deserialize: {e}")))
 }
 
 async fn list_repo_tree(
@@ -121,10 +117,7 @@ async fn list_repo_tree(
     repo: &str,
     branch: &str,
 ) -> Result<Vec<TreeItem>> {
-    let url = format!(
-        "https://api.github.com/repos/{}/{}/git/trees/{}?recursive=1",
-        owner, repo, branch
-    );
+    let url = format!("https://api.github.com/repos/{owner}/{repo}/git/trees/{branch}?recursive=1");
 
     let response = make_github_request(client, &url).await?;
     let tree_response: TreeResponse = deserialize_response(&response)?;
@@ -134,7 +127,11 @@ async fn list_repo_tree(
 
 fn filter_toml_files(tree: &[TreeItem]) -> Vec<&TreeItem> {
     tree.iter()
-        .filter(|item| item.path.ends_with(".toml"))
+        .filter(|&item| {
+            Path::new(&item.path)
+                .extension()
+                .is_some_and(|ext| ext.eq_ignore_ascii_case("toml"))
+        })
         .collect()
 }
 
@@ -191,23 +188,19 @@ pub async fn download_themes(
 
     if toml_files.is_empty() {
         return Err(AlthemerError::Download(format!(
-            "No TOML files found in {}/{} on branch '{}'",
-            owner, repo, branch
+            "No TOML files found in {owner}/{repo} on branch '{branch}'"
         )));
     }
 
     tokio::fs::create_dir_all(themes_dir)
         .await
-        .map_err(|e| AlthemerError::Download(format!("Failed to create directory: {}", e)))?;
+        .map_err(|e| AlthemerError::Download(format!("Failed to create directory: {e}")))?;
 
     let downloads = toml_files
         .iter()
         .map(|&item| {
             let path = item.path.to_string();
-            let url = format!(
-                "https://raw.githubusercontent.com/{}/{}/{}/{}",
-                owner, repo, branch, path
-            );
+            let url = format!("https://raw.githubusercontent.com/{owner}/{repo}/{branch}/{path}");
 
             DownloadFile { path, url }
         })
@@ -217,13 +210,13 @@ pub async fn download_themes(
     let mut downloaded_paths = Vec::with_capacity(total_files);
     let pb = ProgressBar::new(total_files as u64);
     pb.set_style(
-        ProgressStyle::with_template("{spinner:.green} Downloading [{wide_bar:.green}] {msg}")
+        ProgressStyle::with_template("{spinner:.green} Downloading [{wide_bar:.blue}] {msg}")
             .map_err(|_| AlthemerError::Download("Failed to set progress bar style".to_string()))
             .unwrap()
             .progress_chars("█ "),
     );
 
-    for file in downloads.iter() {
+    for file in &downloads {
         let filename = get_filename(&file.path);
         let dest = themes_dir.join(filename);
 
@@ -237,7 +230,7 @@ pub async fn download_themes(
         match download_file(client, &file.url, &dest).await {
             Ok(path) => {
                 pb.inc(1);
-                downloaded_paths.push(path)
+                downloaded_paths.push(path);
             }
             Err(e) => eprintln!("Warning: Failed to download {}: {}", file.path, e),
         }
@@ -256,7 +249,7 @@ pub async fn download_themes(
         .filter_map(|p| {
             p.file_stem()
                 .and_then(|n| n.to_str())
-                .map(|s| s.to_string())
+                .map(std::string::ToString::to_string)
         })
         .collect::<Vec<_>>();
 
