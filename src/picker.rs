@@ -1,4 +1,5 @@
 use nucleo_picker::{Picker, PickerOptions, render::StrRenderer};
+use std::collections::HashMap;
 
 use crate::config::AlthemerConfig;
 use crate::error::{AlthemerError, Result};
@@ -12,17 +13,19 @@ pub fn pick_theme(
 ) -> Result<Option<Theme>> {
     let current_path = current.map(|t| &t.path);
 
-    let items = themes
-        .iter()
-        .map(|t| {
-            let marker = if current_path == Some(&t.path) {
-                " ●"
-            } else {
-                ""
-            };
-            format!("{} {}{}", t.category.icon(), t.name, marker)
-        })
-        .collect::<Vec<_>>();
+    let mut items = Vec::with_capacity(themes.len());
+    let mut name_to_index = HashMap::with_capacity(themes.len());
+
+    for (i, t) in themes.iter().enumerate() {
+        let marker = if current_path == Some(&t.path) {
+            " ●"
+        } else {
+            ""
+        };
+        let display = format!("{} {}{}", t.category.icon(), t.name, marker);
+        name_to_index.insert(t.name.as_str(), i);
+        items.push(display);
+    }
 
     let mut picker: Picker<String, _> = PickerOptions::new()
         .reversed(config.picker_reversed)
@@ -43,7 +46,7 @@ pub fn pick_theme(
                 .trim_start_matches(ThemeCategory::Dark.icon())
                 .trim_start_matches(ThemeCategory::Light.icon())
                 .trim();
-            Ok(themes.iter().find(|&t| t.name == name).cloned())
+            Ok(name_to_index.get(name).map(|&i| themes[i].clone()))
         }
         None => Ok(None),
     }

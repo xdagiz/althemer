@@ -19,6 +19,7 @@ use ratatui::{
         Block, HighlightSpacing, List, ListItem, ListState, Paragraph, StatefulWidget, Widget, Wrap,
     },
 };
+use std::option::Option;
 use std::path::{Path, PathBuf};
 use std::{io, vec};
 
@@ -87,7 +88,7 @@ impl App {
         let filtered_indices = items
             .iter()
             .enumerate()
-            .filter(|(_, t)| t.category() == ThemeCategory::default())
+            .filter(|(_, t)| t.category == ThemeCategory::default())
             .map(|(i, _)| i)
             .collect::<Vec<_>>();
         let preview_cache = (0..items.len()).map(|_| None).collect();
@@ -145,24 +146,24 @@ impl App {
                 KeyCode::Char('q') => self.should_exit = true,
                 KeyCode::Char('j') | KeyCode::Down => self.select_next(area),
                 KeyCode::Char('n') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                    self.select_next(area)
+                    self.select_next(area);
                 }
                 KeyCode::Char('k') | KeyCode::Up => self.select_previous(area),
                 KeyCode::Char('p') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                    self.select_previous(area)
+                    self.select_previous(area);
                 }
                 KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                    self.should_exit = true
+                    self.should_exit = true;
                 }
                 KeyCode::PageDown | KeyCode::Char('d')
                     if key.modifiers.contains(KeyModifiers::CONTROL) =>
                 {
-                    self.page_down(area)
+                    self.page_down(area);
                 }
                 KeyCode::PageUp | KeyCode::Char('u')
                     if key.modifiers.contains(KeyModifiers::CONTROL) =>
                 {
-                    self.page_up(area)
+                    self.page_up(area);
                 }
                 KeyCode::Char('g') | KeyCode::Home => self.select_first(),
                 KeyCode::Char('G') | KeyCode::End => self.select_last(area),
@@ -184,7 +185,7 @@ impl App {
                 }
                 KeyCode::Left | KeyCode::BackTab | KeyCode::Char('h') => {
                     if self.selected_tab > 0 {
-                        self.selected_tab = (self.selected_tab - 1) % 2
+                        self.selected_tab = (self.selected_tab - 1) % 2;
                     }
                     self.apply_filter(area);
                 }
@@ -193,7 +194,7 @@ impl App {
             },
             InputMode::Filtering if key.kind == KeyEventKind::Press => match key.code {
                 KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                    self.should_exit = true
+                    self.should_exit = true;
                 }
                 KeyCode::Enter => {
                     self.input_mode = InputMode::Normal;
@@ -298,10 +299,10 @@ impl App {
     }
 
     fn apply_filter(&mut self, area: Rect) {
-        let lower_filter = if !self.filter_input.is_empty() {
-            self.filter_input.to_lowercase()
-        } else {
+        let lower_filter = if self.filter_input.is_empty() {
             String::new()
+        } else {
+            self.filter_input.to_lowercase()
         };
         let category = match self.selected_tab {
             0 => ThemeCategory::Dark,
@@ -439,13 +440,13 @@ impl App {
         }
 
         if self.quit_on_select {
-            self.should_exit = true
+            self.should_exit = true;
         }
     }
 
     fn update_cached_colors(&mut self) {
         let idx = self.themes.selected;
-        if self.preview_cache.get(idx).is_some_and(|c| c.is_some()) {
+        if self.preview_cache.get(idx).is_some_and(Option::is_some) {
             return;
         }
 
@@ -576,9 +577,7 @@ impl App {
     fn render_preview(&mut self, area: Rect, buf: &mut Buffer) {
         self.update_cached_colors();
 
-        let colors = if let Some(Some(c)) = self.preview_cache.get(self.themes.selected) {
-            c
-        } else {
+        let Some(Some(colors)) = self.preview_cache.get(self.themes.selected) else {
             return;
         };
 
@@ -658,14 +657,14 @@ impl App {
                     match msg {
                         StatusMessage::Info(m) => {
                             left_spans.push(
-                                Span::from(format!(" {} ", m))
+                                Span::from(format!(" {m} "))
                                     .fg(Color::Cyan)
                                     .bg(SURFACE_COLOR),
                             );
                         }
                         StatusMessage::Err(err) => {
                             left_spans.push(
-                                Span::from(format!(" {} ", err))
+                                Span::from(format!(" {err} "))
                                     .fg(Color::Red)
                                     .bg(SURFACE_COLOR),
                             );

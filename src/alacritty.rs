@@ -1,3 +1,4 @@
+use dirs::config_dir;
 use serde::{Deserialize, Serialize};
 
 use crate::error::{AlthemerError, Result};
@@ -19,7 +20,7 @@ pub struct GeneralConfig {
 }
 
 pub fn get_alacritty_config_dir() -> Result<PathBuf> {
-    dirs::config_dir()
+    config_dir()
         .map(|p| p.join("alacritty"))
         .ok_or_else(|| AlthemerError::ConfigNotFound(PathBuf::from("~/.config/alacritty")))
 }
