@@ -79,6 +79,7 @@ althemer -c /path/to/config    # Custom config file location
 ```bash
 althemer list
 ```
+![althemer-list](https://github.com/user-attachments/assets/2848aa84-0648-4ed9-aaff-d888197afc79)
 
 ### Check current theme
 
